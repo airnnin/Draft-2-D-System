@@ -25,3 +25,11 @@ class LandslideSusceptibilityAdmin(GISModelAdmin):
 class LiquefactionSusceptibilityAdmin(GISModelAdmin):
     list_display = ['liquefaction_susc', 'original_code', 'dataset']
     list_filter = ['liquefaction_susc', 'dataset']
+
+from .models import Facility
+
+@admin.register(Facility)
+class FacilityAdmin(GISModelAdmin):
+    list_display = ['name', 'facility_type', 'category', 'osm_id']
+    list_filter = ['category', 'facility_type']
+    search_fields = ['name']

@@ -6,6 +6,8 @@ from rest_framework.response import Response
 from django.contrib.gis.geos import Point
 from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility
 from .utils import ShapefileProcessor
+from .overpass_client import OverpassClient
+from math import radians, cos, sin, asin, sqrt
 import json
 
 def index(request):
@@ -179,5 +181,97 @@ def get_datasets(request):
         )
         return Response(list(datasets))
     
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+    
+@api_view(['GET'])
+def get_nearby_facilities(request):
+    """Get facilities within specified radius using Overpass API"""
+    try:
+        lat = float(request.GET.get('lat'))
+        lng = float(request.GET.get('lng'))
+        radius = int(request.GET.get('radius', 3000))  # Default 3km in meters
+        
+        # Query Overpass API
+        facilities = OverpassClient.query_facilities(lat, lng, radius)
+        
+        # Calculate distances and sort
+        for facility in facilities:
+            distance = calculate_distance(
+                lat, lng,
+                facility['lat'], facility['lng']
+            )
+            facility['distance_meters'] = distance
+            facility['distance_km'] = round(distance / 1000, 2)
+            facility['distance_display'] = format_distance(distance)
+        
+        # Sort by distance
+        facilities.sort(key=lambda x: x['distance_meters'])
+        
+        # Group by category
+        result = {
+            'emergency': [f for f in facilities if f['category'] == 'emergency'],
+            'everyday': [f for f in facilities if f['category'] == 'everyday'],
+            'government': [f for f in facilities if f['category'] == 'government'],
+        }
+        
+        # Add counts
+        result['counts'] = {
+            'emergency': len(result['emergency']),
+            'everyday': len(result['everyday']),
+            'government': len(result['government']),
+            'total': len(facilities)
+        }
+        
+        return Response(result)
+        
+    except ValueError:
+        return Response({'error': 'Invalid coordinates or radius'}, status=400)
+    except Exception as e:
+        print(f"Error in get_nearby_facilities: {e}")
+        return Response({'error': str(e)}, status=500)
+
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    """
+    Calculate distance between two points using Haversine formula
+    Returns distance in meters
+    """
+    # Convert to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    
+    # Radius of earth in meters
+    r = 6371000
+    
+    return c * r
+
+
+def format_distance(meters):
+    """Format distance for display"""
+    if meters < 1000:
+        return f"{int(meters)} m"
+    else:
+        km = meters / 1000
+        return f"{km:.1f} km"
+
+@api_view(['GET'])
+def get_location_info(request):
+    """Get administrative boundary info for a location"""
+    try:
+        lat = float(request.GET.get('lat'))
+        lng = float(request.GET.get('lng'))
+        
+        location_info = OverpassClient.get_location_info(lat, lng)
+        
+        return Response(location_info)
+        
+    except ValueError:
+        return Response({'error': 'Invalid coordinates'}, status=400)
     except Exception as e:
         return Response({'error': str(e)}, status=500)

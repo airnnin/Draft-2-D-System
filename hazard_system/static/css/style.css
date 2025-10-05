@@ -606,3 +606,17 @@ body {
         padding: 1rem;
     }
 }
+
+/* Facility marker styles */
+.custom-facility-marker {
+    background: transparent !important;
+    border: none !important;
+}
+
+.facility-card {
+    transition: all 0.2s ease;
+}
+
+.facility-card:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}

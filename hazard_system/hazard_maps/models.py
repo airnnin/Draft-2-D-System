@@ -75,3 +75,30 @@ class LiquefactionSusceptibility(models.Model):
     
     def __str__(self):
         return f"Liquefaction {self.liquefaction_susc}"
+
+class Facility(models.Model):
+    """Model for storing facility data (optional caching of OSM data)"""
+    CATEGORY_CHOICES = [
+        ('emergency', 'Emergency & Disaster-Related'),
+        ('everyday', 'Everyday Life & Livability'),
+        ('government', 'Government & Administrative'),
+    ]
+    
+    name = models.CharField(max_length=200)
+    facility_type = models.CharField(max_length=50)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES)
+    location = models.PointField(srid=4326)
+    osm_id = models.BigIntegerField(unique=True)
+    osm_type = models.CharField(max_length=10)  # node, way, relation
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['facility_type']),
+            models.Index(fields=['category']),
+            models.Index(fields=['osm_id']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} ({self.facility_type})"
