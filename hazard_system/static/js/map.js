@@ -4,10 +4,11 @@ let currentMarker;
 let facilityMarkers = L.layerGroup();
 
 const COLORS = {
-    'LS': '#10b981',
-    'MS': '#f59e0b',
-    'HS': '#f97316',
-    'VHS': '#ef4444'
+    'LS': '#10b981',   // Green - Low
+    'MS': '#f59e0b',   // Yellow - Moderate
+    'HS': '#f97316',   // Orange - High
+    'VHS': '#ef4444',  // Red - Very High
+    'DF': '#a855f7'    // Purple - Debris Flow (landslide only)
 };
 
 function initMap() {
@@ -64,12 +65,21 @@ function addGeoJSONLayer(geojsonData, layerGroup, hazardType) {
     L.geoJSON(geojsonData, {
         style: function(feature) {
             const susceptibility = feature.properties.susceptibility;
+            // Get color - defaults to gray if unknown code
+            let fillColor = COLORS[susceptibility] || '#9ca3af';
+            
+            // Special styling for Debris Flow - make it more visible
+            let fillOpacity = 0.6;
+            if (susceptibility === 'DF') {
+                fillOpacity = 0.7;  // Slightly more opaque for debris flow
+            }
+            
             return {
-                fillColor: COLORS[susceptibility] || '#9ca3af',
+                fillColor: fillColor,
                 weight: 0.5,
                 opacity: 1,
                 color: 'rgba(255,255,255,0.4)',
-                fillOpacity: 0.6
+                fillOpacity: fillOpacity
             };
         },
         onEachFeature: function(feature, layer) {
@@ -178,46 +188,92 @@ async function getHazardInfoForLocation(lat, lng, container) {
         const data = await response.json();
 
         if (response.ok) {
-            const hazardInfo = [];
+            const overall = data.overall_risk;
+            
+            let html = `
+                <!-- Overall Risk Assessment Card -->
+                <div style="background: ${overall.color}15; border: 2px solid ${overall.color}; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.5rem;">
+                    <div style="text-align: center; margin-bottom: 0.75rem;">
+                        <span style="font-size: 2rem;">${overall.icon}</span>
+                    </div>
+                    <div style="text-align: center; font-size: 1.25rem; font-weight: 700; color: ${overall.color}; margin-bottom: 0.5rem;">
+                        ${overall.category}
+                    </div>
+                    <div style="text-align: center; font-size: 0.875rem; color: #4b5563; margin-bottom: 0.75rem;">
+                        ${overall.message}
+                    </div>
+                    <div style="background: white; border-radius: 0.375rem; padding: 0.75rem; margin-top: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <span style="font-size: 0.75rem; color: #6b7280; font-weight: 600;">RISK SCORE</span>
+                            <span style="font-size: 1.25rem; font-weight: 700; color: ${overall.color};">${overall.score}/100</span>
+                        </div>
+                        <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 9999px; overflow: hidden;">
+                            <div style="width: ${overall.score}%; height: 100%; background: ${overall.color}; transition: width 0.5s;"></div>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #4b5563; margin-top: 0.75rem; padding: 0.625rem; background: white; border-radius: 0.375rem;">
+                        <strong>Recommendation:</strong> ${overall.recommendation}
+                    </div>
+                </div>
 
-            hazardInfo.push('<div class="hazard-item">');
+                <!-- Individual Hazards (Collapsible) -->
+                <details style="margin-bottom: 1rem;">
+                    <summary style="cursor: pointer; font-weight: 600; color: #374151; padding: 0.75rem; background: #f9fafb; border-radius: 0.375rem; margin-bottom: 0.5rem;">
+                        View Detailed Hazard Breakdown ▼
+                    </summary>
+                    <div class="hazard-item" style="margin-top: 0.75rem;">
+            `;
 
+            // Flood
             const floodColor = getColorForLevel(data.flood.level);
-            hazardInfo.push(`
-                <div>
-                    <strong>Flood Susceptibility:</strong>
-                    <div style="display: flex; align-items: center; margin-top: 0.375rem;">
-                        <span style="display: inline-block; width: 16px; height: 16px; background-color: ${floodColor}; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.25rem; margin-right: 0.5rem;"></span>
-                        <span>${data.flood.label}</span>
+            html += `
+                <div style="padding: 0.75rem 0; border-bottom: 1px solid #e5e7eb;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                        <span style="display: inline-block; width: 20px; height: 20px; background-color: ${floodColor}; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.25rem; margin-right: 0.75rem;"></span>
+                        <strong style="flex: 1;">🌊 Flood Risk</strong>
+                    </div>
+                    <div style="margin-left: 2rem; font-size: 0.875rem; color: #6b7280;">
+                        ${data.flood.risk_label}
                     </div>
                 </div>
-            `);
+            `;
 
+            // Landslide
             const landslideColor = getColorForLevel(data.landslide.level);
-            hazardInfo.push(`
-                <div>
-                    <strong>Landslide Susceptibility:</strong>
-                    <div style="display: flex; align-items: center; margin-top: 0.375rem;">
-                        <span style="display: inline-block; width: 16px; height: 16px; background-color: ${landslideColor}; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.25rem; margin-right: 0.5rem;"></span>
-                        <span>${data.landslide.label}</span>
+            const landslideIcon = data.landslide.level === 'DF' ? '🌋' : '⛰️';
+            const landslideLabel = data.landslide.level === 'DF' ? 'Debris Flow Risk' : 'Landslide Risk';
+            html += `
+                <div style="padding: 0.75rem 0; border-bottom: 1px solid #e5e7eb;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                        <span style="display: inline-block; width: 20px; height: 20px; background-color: ${landslideColor}; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.25rem; margin-right: 0.75rem;"></span>
+                        <strong style="flex: 1;">${landslideIcon} ${landslideLabel}</strong>
+                    </div>
+                    <div style="margin-left: 2rem; font-size: 0.875rem; color: #6b7280;">
+                        ${data.landslide.risk_label}
                     </div>
                 </div>
-            `);
+            `;
 
+            // Liquefaction
             const liquefactionColor = getColorForLevel(data.liquefaction.level);
-            hazardInfo.push(`
-                <div>
-                    <strong>Liquefaction Susceptibility:</strong>
-                    <div style="display: flex; align-items: center; margin-top: 0.375rem;">
-                        <span style="display: inline-block; width: 16px; height: 16px; background-color: ${liquefactionColor}; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.25rem; margin-right: 0.5rem;"></span>
-                        <span>${data.liquefaction.label}</span>
+            html += `
+                <div style="padding: 0.75rem 0;">
+                    <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                        <span style="display: inline-block; width: 20px; height: 20px; background-color: ${liquefactionColor}; border: 1px solid rgba(0,0,0,0.1); border-radius: 0.25rem; margin-right: 0.75rem;"></span>
+                        <strong style="flex: 1;">〰️ Ground Shaking Risk</strong>
+                    </div>
+                    <div style="margin-left: 2rem; font-size: 0.875rem; color: #6b7280;">
+                        ${data.liquefaction.risk_label}
                     </div>
                 </div>
-            `);
+            `;
 
-            hazardInfo.push('</div>');
+            html += `
+                    </div>
+                </details>
+            `;
 
-            container.innerHTML = hazardInfo.join('');
+            container.innerHTML = html;
         } else {
             container.innerHTML = `<p style="color: #ef4444; padding: 1rem; text-align: center;">Error: ${data.error || 'Unable to retrieve hazard information'}</p>`;
         }
@@ -228,7 +284,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
 }
 
 function getColorForLevel(level) {
-    if (!level) return '#9ca3af';
+    if (!level) return '#10b981';  // No data = GREEN (safe zone)
     return COLORS[level] || '#9ca3af';
 }
 
@@ -511,76 +567,117 @@ function displayFacilities(data) {
         container.innerHTML = `
             <div style="padding: 1rem; background: #fef3c7; border: 1px solid #fbbf24; border-radius: 0.5rem; text-align: center;">
                 <p style="margin: 0; color: #92400e;">No facilities found within 3km radius</p>
-                <p style="margin: 0.5rem 0 0 0; font-size: 0.8rem; color: #92400e;">Try selecting a location in a more populated area</p>
             </div>
         `;
         return;
     }
     
     let html = `
-        <div style="margin-bottom: 1rem; padding: 0.75rem; background: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 0.5rem;">
-            <strong style="color: #1e40af;">Found ${data.counts.total} facilities within 3km</strong>
+        <!-- Emergency Readiness Summary -->
+        <div style="background: #f0f9ff; border: 1px solid #bfdbfe; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.5rem;">
+            <h5 style="margin: 0 0 0.75rem 0; color: #1e40af; font-size: 0.95rem; font-weight: 700;">
+                🚨 Emergency Preparedness
+            </h5>
+    `;
+    
+    // Nearest Evacuation
+    if (data.summary.nearest_evacuation) {
+        const evac = data.summary.nearest_evacuation;
+        const walkIcon = evac.is_walkable ? '✅' : '⚠️';
+        html += `
+            <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 0.375rem;">
+                <div style="font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;">Nearest Evacuation Center:</div>
+                <div style="font-weight: 600; color: #1f2937; font-size: 0.875rem;">${walkIcon} ${evac.name}</div>
+                <div style="font-size: 0.8rem; color: #059669; font-weight: 600;">${evac.distance} away</div>
+            </div>
+        `;
+    } else {
+        html += `
+            <div style="padding: 0.75rem; background: #fee2e2; border-radius: 0.375rem; margin-bottom: 0.5rem;">
+                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No evacuation center within 3km</div>
+            </div>
+        `;
+    }
+    
+    // Nearest Hospital
+    if (data.summary.nearest_hospital) {
+        const hosp = data.summary.nearest_hospital;
+        const walkIcon = hosp.is_walkable ? '✅' : '⚠️';
+        html += `
+            <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 0.375rem;">
+                <div style="font-size: 0.8rem; color: #6b7280; margin-bottom: 0.25rem;">Nearest Medical Facility:</div>
+                <div style="font-weight: 600; color: #1f2937; font-size: 0.875rem;">${walkIcon} ${hosp.name}</div>
+                <div style="font-size: 0.8rem; color: #059669; font-weight: 600;">${hosp.distance} away</div>
+            </div>
+        `;
+    }
+    
+    html += `
+            <div style="font-size: 0.75rem; color: #6b7280; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #bfdbfe;">
+                ✅ = Within 500m walking distance
+            </div>
         </div>
     `;
     
-    if (data.emergency.length > 0) {
+    // Detailed Facility Lists (Collapsible)
+    if (data.evacuation_centers.length > 0) {
         html += `
-            <div class="facility-category" style="margin-bottom: 1.5rem;">
-                <h5 style="color: #dc2626; margin-bottom: 0.75rem; font-size: 0.95rem; font-weight: 700; padding-bottom: 0.5rem; border-bottom: 2px solid #fee2e2;">
-                    Emergency & Disaster Facilities (${data.emergency.length})
-                </h5>
+            <details style="margin-bottom: 1rem;">
+                <summary style="cursor: pointer; font-weight: 600; color: #dc2626; padding: 0.75rem; background: #fee2e2; border-radius: 0.375rem;">
+                    🏠 Evacuation Centers (${data.counts.evacuation}) ▼
+                </summary>
+                <div style="margin-top: 0.5rem;">
         `;
-        
-        data.emergency.slice(0, 10).forEach((f, index) => {
+        data.evacuation_centers.forEach((f, index) => {
+            html += createFacilityCard(f, '#dc2626', '#fef2f2', `evac-${index}`);
+            addFacilityMarker(f, '#dc2626');
+        });
+        html += `</div></details>`;
+    }
+    
+    if (data.medical.length > 0) {
+        html += `
+            <details style="margin-bottom: 1rem;">
+                <summary style="cursor: pointer; font-weight: 600; color: #dc2626; padding: 0.75rem; background: #fee2e2; border-radius: 0.375rem;">
+                    🏥 Medical Facilities (${data.counts.medical}) ▼
+                </summary>
+                <div style="margin-top: 0.5rem;">
+        `;
+        data.medical.forEach((f, index) => {
+            html += createFacilityCard(f, '#dc2626', '#fef2f2', `medical-${index}`);
+            addFacilityMarker(f, '#dc2626');
+        });
+        html += `</div></details>`;
+    }
+    
+    if (data.emergency_services.length > 0) {
+        html += `
+            <details style="margin-bottom: 1rem;">
+                <summary style="cursor: pointer; font-weight: 600; color: #dc2626; padding: 0.75rem; background: #fee2e2; border-radius: 0.375rem;">
+                    🚒 Emergency Services (${data.counts.emergency_services}) ▼
+                </summary>
+                <div style="margin-top: 0.5rem;">
+        `;
+        data.emergency_services.forEach((f, index) => {
             html += createFacilityCard(f, '#dc2626', '#fef2f2', `emergency-${index}`);
             addFacilityMarker(f, '#dc2626');
         });
-        
-        if (data.emergency.length > 10) {
-            html += `<p style="text-align: center; color: #6b7280; font-size: 0.8rem; margin-top: 0.5rem;">... and ${data.emergency.length - 10} more</p>`;
-        }
-        
-        html += '</div>';
+        html += `</div></details>`;
     }
     
-    if (data.everyday.length > 0) {
+    if (data.essential_services.length > 0) {
         html += `
-            <div class="facility-category" style="margin-bottom: 1.5rem;">
-                <h5 style="color: #2563eb; margin-bottom: 0.75rem; font-size: 0.95rem; font-weight: 700; padding-bottom: 0.5rem; border-bottom: 2px solid #dbeafe;">
-                    Everyday Facilities (${data.everyday.length})
-                </h5>
+            <details style="margin-bottom: 1rem;">
+                <summary style="cursor: pointer; font-weight: 600; color: #2563eb; padding: 0.75rem; background: #dbeafe; border-radius: 0.375rem;">
+                    🛒 Essential Services (${data.counts.essential}) ▼
+                </summary>
+                <div style="margin-top: 0.5rem;">
         `;
-        
-        data.everyday.slice(0, 10).forEach((f, index) => {
-            html += createFacilityCard(f, '#2563eb', '#eff6ff', `everyday-${index}`);
+        data.essential_services.forEach((f, index) => {
+            html += createFacilityCard(f, '#2563eb', '#eff6ff', `essential-${index}`);
             addFacilityMarker(f, '#2563eb');
         });
-        
-        if (data.everyday.length > 10) {
-            html += `<p style="text-align: center; color: #6b7280; font-size: 0.8rem; margin-top: 0.5rem;">... and ${data.everyday.length - 10} more</p>`;
-        }
-        
-        html += '</div>';
-    }
-    
-    if (data.government.length > 0) {
-        html += `
-            <div class="facility-category" style="margin-bottom: 1.5rem;">
-                <h5 style="color: #059669; margin-bottom: 0.75rem; font-size: 0.95rem; font-weight: 700; padding-bottom: 0.5rem; border-bottom: 2px solid #d1fae5;">
-                    Government Facilities (${data.government.length})
-                </h5>
-        `;
-        
-        data.government.slice(0, 10).forEach((f, index) => {
-            html += createFacilityCard(f, '#059669', '#f0fdf4', `government-${index}`);
-            addFacilityMarker(f, '#059669');
-        });
-        
-        if (data.government.length > 10) {
-            html += `<p style="text-align: center; color: #6b7280; font-size: 0.8rem; margin-top: 0.5rem;">... and ${data.government.length - 10} more</p>`;
-        }
-        
-        html += '</div>';
+        html += `</div></details>`;
     }
     
     html += `

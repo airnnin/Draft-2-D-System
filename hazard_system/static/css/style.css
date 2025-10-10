@@ -631,6 +631,10 @@ body {
     background: #ef4444;
 }
 
+.legend-color.debris-flow {
+    background: #a855f7;
+}
+
 .legend-label {
     font-weight: 500;
 }

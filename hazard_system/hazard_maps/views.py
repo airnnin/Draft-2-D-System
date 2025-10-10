@@ -152,18 +152,30 @@ def get_location_hazards(request):
             geometry__contains=point
         ).first()
         
+        # Extract levels
+        flood_level = flood_result.flood_susc if flood_result else None
+        landslide_level = landslide_result.landslide_susc if landslide_result else None
+        liquefaction_level = liquefaction_result.liquefaction_susc if liquefaction_result else None
+        
+        # Calculate overall risk
+        risk_assessment = calculate_risk_score(flood_level, landslide_level, liquefaction_level)
+        
         return Response({
+            'overall_risk': risk_assessment,  # NEW: Overall risk score
             'flood': {
-                'level': flood_result.flood_susc if flood_result else None,
-                'label': flood_result.get_flood_susc_display() if flood_result else 'No Data Available'
+                'level': flood_level,
+                'label': flood_result.get_flood_susc_display() if flood_result else 'No Data Available',
+                'risk_label': get_user_friendly_label(flood_level, 'flood')  # NEW
             },
             'landslide': {
-                'level': landslide_result.landslide_susc if landslide_result else None,
-                'label': landslide_result.get_landslide_susc_display() if landslide_result else 'No Data Available'
+                'level': landslide_level,
+                'label': landslide_result.get_landslide_susc_display() if landslide_result else 'No Data Available',
+                'risk_label': get_user_friendly_label(landslide_level, 'landslide')  # NEW
             },
             'liquefaction': {
-                'level': liquefaction_result.liquefaction_susc if liquefaction_result else None,
-                'label': liquefaction_result.get_liquefaction_susc_display() if liquefaction_result else 'No Data Available'
+                'level': liquefaction_level,
+                'label': liquefaction_result.get_liquefaction_susc_display() if liquefaction_result else 'No Data Available',
+                'risk_label': get_user_friendly_label(liquefaction_level, 'liquefaction')  # NEW
             }
         })
         
@@ -171,6 +183,100 @@ def get_location_hazards(request):
         return Response({'error': 'Invalid coordinates'}, status=400)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+def get_user_friendly_label(level, hazard_type):
+    """Convert technical labels to user-friendly descriptions"""
+    if not level:
+        # No data means no hazard in this area
+        return 'Not at risk - No hazard data for this area (safe zone)'
+    
+    DESCRIPTIONS = {
+        'flood': {
+            'LS': 'Low risk - Flooding unlikely',
+            'MS': 'Moderate risk - Occasional flooding possible',
+            'HS': 'High risk - Frequent flooding expected',
+            'VHS': 'Very high risk - Severe flooding likely'
+        },
+        'landslide': {
+            'LS': 'Low risk - Stable terrain',
+            'MS': 'Moderate risk - Some slope instability',
+            'HS': 'High risk - Landslide-prone area',
+            'VHS': 'Very high risk - Critical landslide zone',
+            'DF': 'Debris Flow zone - Rapid downslope movement of rocks and soil'
+        },
+        'liquefaction': {
+            'LS': 'Low risk - Soil unlikely to liquefy',
+            'MS': 'Moderate risk - Soil may weaken during earthquakes',
+            'HS': 'High risk - Soil prone to liquefaction'
+        }
+    }
+    
+    return DESCRIPTIONS.get(hazard_type, {}).get(level, 'Risk level unknown')
+
+def calculate_risk_score(flood_level, landslide_level, liquefaction_level):
+    """
+    Calculate overall risk score based on hazard levels
+    NO DATA = LOW RISK (area is safe from that hazard)
+    Returns: dict with score (0-100), category, and color
+    """
+    # Risk weights based on Philippine disaster frequency
+    WEIGHTS = {
+        'flood': 0.5,      # 50% - most frequent disaster
+        'landslide': 0.3,  # 30% - common in mountainous areas
+        'liquefaction': 0.2 # 20% - only during earthquakes
+    }
+    
+    # Susceptibility level scores
+    LEVEL_SCORES = {
+        'LS': 25,   # Low = 25/100
+        'MS': 50,   # Moderate = 50/100
+        'HS': 75,   # High = 75/100
+        'VHS': 100, # Very High = 100/100
+        'DF': 90,   # Debris Flow = 90/100 (specific to landslide)
+        None: 10    # NO DATA = 10/100 (assume safe - no hazard present)
+    }
+    
+    # Calculate weighted score
+    flood_score = LEVEL_SCORES.get(flood_level, 10) * WEIGHTS['flood']
+    landslide_score = LEVEL_SCORES.get(landslide_level, 10) * WEIGHTS['landslide']
+    liquefaction_score = LEVEL_SCORES.get(liquefaction_level, 10) * WEIGHTS['liquefaction']
+    
+    total_score = flood_score + landslide_score + liquefaction_score
+    
+    # Categorize overall risk
+    if total_score < 25:
+        category = 'LOW RISK'
+        message = 'Generally safe for development'
+        color = '#10b981'  # Green
+        icon = '✅'
+        recommendation = 'This location has low disaster risk. Suitable for most types of construction.'
+    elif total_score < 50:
+        category = 'MODERATE RISK'
+        message = 'Acceptable with precautions'
+        color = '#f59e0b'  # Yellow
+        icon = '⚠️'
+        recommendation = 'This location has moderate risk. Construction requires standard disaster mitigation measures.'
+    elif total_score < 75:
+        category = 'HIGH RISK'
+        message = 'Significant hazards present'
+        color = '#f97316'  # Orange
+        icon = '⚠️'
+        recommendation = 'This location has high disaster risk. Consult engineers and implement strong mitigation measures.'
+    else:
+        category = 'VERY HIGH RISK'
+        message = 'Not recommended for development'
+        color = '#ef4444'  # Red
+        icon = '🚫'
+        recommendation = 'This location has very high disaster risk. Development strongly discouraged. Consider alternative sites.'
+    
+    return {
+        'score': round(total_score, 1),
+        'category': category,
+        'message': message,
+        'color': color,
+        'icon': icon,
+        'recommendation': recommendation
+    }
 
 @api_view(['GET'])
 def get_datasets(request):
@@ -186,41 +292,102 @@ def get_datasets(request):
     
 @api_view(['GET'])
 def get_nearby_facilities(request):
-    """Get facilities within specified radius using Overpass API"""
+    """Get facilities within specified radius with disaster-priority grouping"""
     try:
         lat = float(request.GET.get('lat'))
         lng = float(request.GET.get('lng'))
-        radius = int(request.GET.get('radius', 3000))  # Default 3km in meters
+        radius = int(request.GET.get('radius', 3000))
         
-        # Query Overpass API
         facilities = OverpassClient.query_facilities(lat, lng, radius)
         
-        # Calculate distances and sort
+        # Calculate distances
         for facility in facilities:
-            distance = calculate_distance(
-                lat, lng,
-                facility['lat'], facility['lng']
-            )
+            distance = calculate_distance(lat, lng, facility['lat'], facility['lng'])
             facility['distance_meters'] = distance
             facility['distance_km'] = round(distance / 1000, 2)
             facility['distance_display'] = format_distance(distance)
+            
+            # Add walkability flag (critical for disasters)
+            facility['is_walkable'] = distance <= 500  # Within 500m
         
-        # Sort by distance
         facilities.sort(key=lambda x: x['distance_meters'])
         
-        # Group by category
-        result = {
-            'emergency': [f for f in facilities if f['category'] == 'emergency'],
-            'everyday': [f for f in facilities if f['category'] == 'everyday'],
-            'government': [f for f in facilities if f['category'] == 'government'],
-        }
+        # NEW: Reorganize by disaster priority
+        evacuation_centers = []
+        medical = []
+        emergency_services = []
+        essential_services = []
+        other_facilities = []
         
-        # Add counts
-        result['counts'] = {
-            'emergency': len(result['emergency']),
-            'everyday': len(result['everyday']),
-            'government': len(result['government']),
-            'total': len(facilities)
+        for f in facilities:
+            ftype = f['facility_type']
+            
+            # Priority 1: Evacuation (schools, gyms, community centers as shelters)
+            if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                f['subcategory'] = 'evacuation'
+                f['priority'] = 1
+                evacuation_centers.append(f)
+            
+            # Priority 2: Medical
+            elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                f['subcategory'] = 'medical'
+                f['priority'] = 2
+                medical.append(f)
+            
+            # Priority 3: Emergency Services
+            elif ftype in ['fire_station', 'police']:
+                f['subcategory'] = 'emergency_services'
+                f['priority'] = 3
+                emergency_services.append(f)
+            
+            # Priority 4: Essential Services (food, water)
+            elif ftype in ['marketplace', 'supermarket', 'convenience']:
+                f['subcategory'] = 'essential'
+                f['priority'] = 4
+                essential_services.append(f)
+            
+            # Priority 5: Everything else
+            else:
+                f['subcategory'] = 'other'
+                f['priority'] = 5
+                other_facilities.append(f)
+        
+        # Find nearest of each critical type
+        nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
+        nearest_hospital = next((f for f in medical if f['facility_type'] in ['hospital', 'clinic']), None)
+        nearest_fire = next((f for f in emergency_services if f['facility_type'] == 'fire_station'), None)
+        
+        result = {
+            'summary': {
+                'nearest_evacuation': {
+                    'name': nearest_evacuation['name'] if nearest_evacuation else 'None within 3km',
+                    'distance': nearest_evacuation['distance_display'] if nearest_evacuation else 'N/A',
+                    'is_walkable': nearest_evacuation['is_walkable'] if nearest_evacuation else False,
+                } if nearest_evacuation else None,
+                'nearest_hospital': {
+                    'name': nearest_hospital['name'] if nearest_hospital else 'None within 3km',
+                    'distance': nearest_hospital['distance_display'] if nearest_hospital else 'N/A',
+                    'is_walkable': nearest_hospital['is_walkable'] if nearest_hospital else False,
+                } if nearest_hospital else None,
+                'nearest_fire_station': {
+                    'name': nearest_fire['name'] if nearest_fire else 'None within 3km',
+                    'distance': nearest_fire['distance_display'] if nearest_fire else 'N/A',
+                    'is_walkable': nearest_fire['is_walkable'] if nearest_fire else False,
+                } if nearest_fire else None,
+            },
+            'evacuation_centers': evacuation_centers[:10],
+            'medical': medical[:10],
+            'emergency_services': emergency_services[:10],
+            'essential_services': essential_services[:10],
+            'other': other_facilities[:10],
+            'counts': {
+                'evacuation': len(evacuation_centers),
+                'medical': len(medical),
+                'emergency_services': len(emergency_services),
+                'essential': len(essential_services),
+                'other': len(other_facilities),
+                'total': len(facilities)
+            }
         }
         
         return Response(result)
