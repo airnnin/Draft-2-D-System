@@ -10,43 +10,25 @@ const COLORS = {
     'VHS': '#ef4444'
 };
 
-// function initMap() {
-//     map = L.map('map').setView([9.3, 123.3], 9);
-
-//     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-//         attribution: '© OpenStreetMap contributors',
-//         maxZoom: 19
-//     }).addTo(map);
-
-//     floodLayer = L.layerGroup().addTo(map);
-//     landslideLayer = L.layerGroup().addTo(map);
-//     liquefactionLayer = L.layerGroup().addTo(map);
-
-//     loadHazardData();
-
-//     // Map click - only trigger when not clicking on a polygon
-//     map.on('click', function (e) {
-//         // Check if click was on the map itself, not a feature
-//         if (!e.originalEvent.defaultPrevented) {
-//             onMapClick(e);
-//         }
-//     });
-// }
-
 function initMap() {
-    map = L.map('map').setView([9.3, 123.3], 9);
+    map = L.map('map', {
+        zoomControl: false
+    }).setView([9.3, 123.3], 9);
 
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors',
         maxZoom: 19
     }).addTo(map);
 
+    // Create layer groups - only flood visible by default
     floodLayer = L.layerGroup().addTo(map);
-    landslideLayer = L.layerGroup().addTo(map);
-    liquefactionLayer = L.layerGroup().addTo(map);
-    facilityMarkers.addTo(map); // Add this line
+    landslideLayer = L.layerGroup(); // Not added to map initially
+    liquefactionLayer = L.layerGroup(); // Not added to map initially
+    facilityMarkers.addTo(map);
 
+    // Load all data upfront for instant toggling
     loadHazardData();
+    
     map.on('click', function (e) {
         if (!e.originalEvent.defaultPrevented) {
             onMapClick(e);
@@ -91,13 +73,7 @@ function addGeoJSONLayer(geojsonData, layerGroup, hazardType) {
             };
         },
         onEachFeature: function(feature, layer) {
-            // Remove popup binding - polygons are now just visual layers
-            // Clicking them will place the pin instead
-            
-            // Make polygon clicks pass through to the map
             layer.on('click', function(e) {
-                // Don't stop propagation - let the click pass through to map
-                // This allows pin placement on polygons
                 onMapClick(e);
             });
             
@@ -124,18 +100,15 @@ async function showLocationInfo(lat, lng) {
     const locationInfo = document.getElementById('location-info');
     const hazardDetails = document.getElementById('hazard-details');
 
-    // Show sidebar
     sidebar.classList.remove('hidden');
     sidebarToggle.classList.add('sidebar-open');
 
-    // Show loading state
     locationInfo.innerHTML = `
         <div style="text-align: center;">
             <p style="color: #6b7280; font-size: 0.875rem;">Loading location information...</p>
         </div>
     `;
 
-    // Fetch location details
     try {
         const response = await fetch(`/api/location-info/?lat=${lat}&lng=${lng}`);
         const locationData = await response.json();
@@ -158,7 +131,6 @@ async function showLocationInfo(lat, lng) {
                 </div>
             `;
         } else {
-            // Fallback to coordinates only
             locationInfo.innerHTML = `
                 <div style="text-align: left;">
                     <strong style="color: #1f2937; font-size: 0.95rem; display: block; margin-bottom: 0.5rem;">
@@ -175,7 +147,6 @@ async function showLocationInfo(lat, lng) {
         }
     } catch (error) {
         console.error('Error fetching location info:', error);
-        // Fallback to coordinates
         locationInfo.innerHTML = `
             <div style="text-align: left;">
                 <strong style="color: #1f2937; font-size: 0.95rem; display: block; margin-bottom: 0.5rem;">
@@ -191,10 +162,8 @@ async function showLocationInfo(lat, lng) {
         `;
     }
 
-    // Load hazard info
     getHazardInfoForLocation(lat, lng, hazardDetails);
     
-    // Load facilities
     const facilitiesContainer = document.getElementById('facilities-section');
     if (facilitiesContainer) {
         loadNearbyFacilities(lat, lng);
@@ -263,6 +232,44 @@ function getColorForLevel(level) {
     return COLORS[level] || '#9ca3af';
 }
 
+// Custom Zoom Controls
+function setupCustomZoomControls() {
+    const zoomInBtn = document.getElementById('zoom-in-btn');
+    const zoomOutBtn = document.getElementById('zoom-out-btn');
+
+    zoomInBtn.addEventListener('click', function() {
+        map.zoomIn();
+    });
+
+    zoomOutBtn.addEventListener('click', function() {
+        map.zoomOut();
+    });
+}
+
+// Layer Control Panel
+// Layer Control Panel
+function setupLayerControl() {
+    const layerControlBtn = document.getElementById('layer-control-btn');
+    const layerPanel = document.getElementById('layer-panel');
+    const closeLayerPanel = document.getElementById('close-layer-panel');
+
+    layerControlBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        layerPanel.classList.toggle('hidden');
+    });
+
+    closeLayerPanel.addEventListener('click', function() {
+        layerPanel.classList.add('hidden');
+    });
+
+    // Close panel when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!layerPanel.contains(e.target) && !layerControlBtn.contains(e.target)) {
+            layerPanel.classList.add('hidden');
+        }
+    });
+}
+
 // Sidebar controls
 function setupSidebarControls() {
     const sidebar = document.getElementById('sidebar');
@@ -277,6 +284,23 @@ function setupSidebarControls() {
     sidebarClose.addEventListener('click', function () {
         sidebar.classList.add('hidden');
         sidebarToggle.classList.remove('sidebar-open');
+    });
+}
+
+// Legend Controls
+function setupLegendControls() {
+    const legend = document.getElementById('legend');
+    const legendToggle = document.getElementById('legend-toggle');
+    const closeLegend = document.getElementById('close-legend');
+
+    closeLegend.addEventListener('click', function() {
+        legend.classList.add('hidden');
+        legendToggle.classList.remove('hidden');
+    });
+
+    legendToggle.addEventListener('click', function() {
+        legend.classList.remove('hidden');
+        legendToggle.classList.add('hidden');
     });
 }
 
@@ -327,7 +351,6 @@ function setupUploadModal() {
         resetUploadForm();
     });
 
-    // Close modal when clicking outside
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
             modal.classList.add('hidden');
@@ -430,7 +453,6 @@ async function performSearch() {
     }
     
     try {
-        // Use Nominatim for free geocoding
         const response = await fetch(
             `https://nominatim.openstreetmap.org/search?` +
             `format=json&q=${encodeURIComponent(searchTerm + ', Negros Oriental, Philippines')}&limit=5`
@@ -442,18 +464,13 @@ async function performSearch() {
             const lat = parseFloat(results[0].lat);
             const lng = parseFloat(results[0].lon);
             
-            // Zoom to location
             map.setView([lat, lng], 15);
             
-            // Remove existing marker
             if (currentMarker) {
                 map.removeLayer(currentMarker);
             }
             
-            // Add marker
             currentMarker = L.marker([lat, lng]).addTo(map);
-            
-            // Show info
             showLocationInfo(lat, lng);
         } else {
             alert('Location not found. Try: "Dumaguete", "Bais", or a barangay name');
@@ -464,14 +481,6 @@ async function performSearch() {
         alert('Error searching for location');
     }
 }
-
-document.addEventListener('DOMContentLoaded', function () {
-    initMap();
-    setupSidebarControls();
-    setupLayerToggles();
-    setupUploadModal();
-    setupSearch();
-});
 
 async function loadNearbyFacilities(lat, lng) {
     const container = document.getElementById('facilities-section');
@@ -496,7 +505,6 @@ async function loadNearbyFacilities(lat, lng) {
 function displayFacilities(data) {
     const container = document.getElementById('facilities-section');
     
-    // Clear existing facility markers
     facilityMarkers.clearLayers();
     
     if (data.counts.total === 0) {
@@ -515,7 +523,6 @@ function displayFacilities(data) {
         </div>
     `;
     
-    // Emergency facilities
     if (data.emergency.length > 0) {
         html += `
             <div class="facility-category" style="margin-bottom: 1.5rem;">
@@ -536,7 +543,6 @@ function displayFacilities(data) {
         html += '</div>';
     }
     
-    // Everyday facilities
     if (data.everyday.length > 0) {
         html += `
             <div class="facility-category" style="margin-bottom: 1.5rem;">
@@ -557,7 +563,6 @@ function displayFacilities(data) {
         html += '</div>';
     }
     
-    // Government facilities
     if (data.government.length > 0) {
         html += `
             <div class="facility-category" style="margin-bottom: 1.5rem;">
@@ -587,8 +592,6 @@ function displayFacilities(data) {
     `;
     
     container.innerHTML = html;
-    
-    // Add click event listeners after HTML is inserted
     attachFacilityClickListeners();
 }
 
@@ -616,7 +619,6 @@ function createFacilityCard(facility, borderColor, bgColor, facilityId) {
 }
 
 function addFacilityMarker(facility, color) {
-    // Create custom icon with color
     const icon = L.divIcon({
         className: 'custom-facility-marker',
         html: `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);"></div>`,
@@ -646,13 +648,11 @@ function attachFacilityClickListeners() {
             const lat = parseFloat(this.dataset.lat);
             const lng = parseFloat(this.dataset.lng);
             
-            // Zoom to facility location
             map.setView([lat, lng], 17, {
                 animate: true,
                 duration: 0.5
             });
             
-            // Find and open the corresponding marker popup
             facilityMarkers.eachLayer(layer => {
                 if (layer instanceof L.Marker) {
                     const markerLatLng = layer.getLatLng();
@@ -667,7 +667,6 @@ function attachFacilityClickListeners() {
 }
 
 function adjustColor(color, amount) {
-    // Helper function to darken/lighten colors for hover effect
     return color.replace(/^#/, '')
         .match(/.{2}/g)
         .map(hex => {
@@ -676,3 +675,15 @@ function adjustColor(color, amount) {
         })
         .reduce((str, hex) => str + hex, '#');
 }
+
+// Initialize everything when DOM is ready
+document.addEventListener('DOMContentLoaded', function () {
+    initMap();
+    setupCustomZoomControls();
+    setupLayerControl();
+    setupSidebarControls();
+    setupLegendControls();
+    setupLayerToggles();
+    setupUploadModal();
+    setupSearch();
+});

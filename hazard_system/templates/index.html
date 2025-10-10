@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Disaster Risk Assessment System - Negros Oriental</title>
+    <title>ARISE - Area Information for Safe Environments | Negros Oriental</title>
+    <link rel="icon" type="image/png" href="/static/images/arise-logo.png">
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -13,47 +14,74 @@
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <h1>Disaster Risk Assessment System</h1>
-            <p>Negros Oriental Hazard Mapping & Analysis</p>
-        </header>
-
-        <!-- Navigation Bar -->
-        <nav class="navbar">
-            <div class="nav-left">
-                <div class="search-container">
-                    <input type="text" id="location-search" placeholder="Search for a location...">
-                    <button id="search-btn">
-                        <i class="search-icon">🔍</i> Search
-                    </button>
+        <!-- Compact Header -->
+        <header class="compact-header">
+            <div class="header-left">
+                <div class="logo">
+                    <img src="/static/images/arise-logo.png" alt="ARISE Logo" class="logo-image">
+                    <div class="logo-text-container">
+                        <span class="logo-title">ARISE</span>
+                        <span class="logo-subtitle">Area Information for Safe Environments</span>
+                    </div>
                 </div>
             </div>
-            
-            <div class="nav-right">
-                <div class="layer-toggles">
-                    <label class="toggle-label">
-                        <input type="checkbox" id="flood-toggle" checked>
-                        <span class="toggle-text">Flood</span>
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="landslide-toggle" checked>
-                        <span class="toggle-text">Landslide</span>
-                    </label>
-                    <label class="toggle-label">
-                        <input type="checkbox" id="liquefaction-toggle" checked>
-                        <span class="toggle-text">Liquefaction</span>
-                    </label>
-                </div>
-                
+            <div class="header-right">
                 <button id="upload-btn" class="upload-button">
-                    <span>📁</span> Upload Data
+                    <img src="/static/images/icon-upload.png" alt="Upload" class="button-icon">
+                    <span>Upload Data</span>
                 </button>
             </div>
-        </nav>
+        </header>
 
         <!-- Main Content -->
         <div class="main-content">
+            <!-- Floating Search Bar (Left Side) -->
+            <div class="floating-search">
+                <input type="text" id="location-search" placeholder="Search location in Negros Oriental...">
+                <button id="search-btn" title="Search">
+                    <img src="/static/images/icon-search.png" alt="Search" class="button-icon-small">
+                </button>
+            </div>
+
+            <!-- Right Side Controls -->
+            <div class="right-controls">
+                <button id="zoom-in-btn" class="control-btn" title="Zoom in">
+                    <span class="icon">+</span>
+                </button>
+                <button id="zoom-out-btn" class="control-btn" title="Zoom out">
+                    <span class="icon">−</span>
+                </button>
+                <!-- Layer Control Button (moved here) -->
+                <button id="layer-control-btn" class="control-btn" title="Disaster Layers">
+                    <img src="/static/images/icon-layers.png" alt="Layers" class="button-icon-small">
+                </button>
+            </div>
+
+            <!-- Layer Control Panel -->
+            <div id="layer-panel" class="layer-panel hidden">
+                <div class="layer-panel-header">
+                    <h4>Disaster Layers</h4>
+                    <button class="close-panel-btn" id="close-layer-panel">×</button>
+                </div>
+                <div class="layer-panel-content">
+                    <label class="layer-toggle-item">
+                        <input type="checkbox" id="flood-toggle" checked>
+                        <img src="/static/images/icon-flood.png" alt="Flood" class="layer-icon-img">
+                        <span class="layer-name">Flood Risk Map</span>
+                    </label>
+                    <label class="layer-toggle-item">
+                        <input type="checkbox" id="landslide-toggle">
+                        <img src="/static/images/icon-landslide.png" alt="Landslide" class="layer-icon-img">
+                        <span class="layer-name">Landslide Risk Map</span>
+                    </label>
+                    <label class="layer-toggle-item">
+                        <input type="checkbox" id="liquefaction-toggle">
+                        <img src="/static/images/icon-liquefaction.png" alt="Liquefaction" class="layer-icon-img">
+                        <span class="layer-name">Liquefaction Risk Map</span>
+                    </label>
+                </div>
+            </div>
+
             <!-- Sidebar Toggle Button -->
             <button id="sidebar-toggle" class="sidebar-toggle-btn" title="Toggle Information Panel">
                 <span class="toggle-icon">◀</span>
@@ -135,26 +163,36 @@
             </div>
         </div>
 
-        <!-- Legend -->
-        <div class="legend">
-            <h4>Hazard Levels</h4>
-            <div class="legend-item">
-                <span class="legend-color low"></span>
-                <span>Low Susceptibility</span>
+        <!-- Compact Legend -->
+        <div id="legend" class="compact-legend">
+            <div class="legend-header">
+                <h4>Hazard Levels</h4>
+                <button id="close-legend" class="legend-close-btn" title="Close">×</button>
             </div>
-            <div class="legend-item">
-                <span class="legend-color moderate"></span>
-                <span>Moderate Susceptibility</span>
-            </div>
-            <div class="legend-item">
-                <span class="legend-color high"></span>
-                <span>High Susceptibility</span>
-            </div>
-            <div class="legend-item">
-                <span class="legend-color very-high"></span>
-                <span>Very High Susceptibility</span>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <span class="legend-color low"></span>
+                    <span class="legend-label">Low</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color moderate"></span>
+                    <span class="legend-label">Moderate</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color high"></span>
+                    <span class="legend-label">High</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-color very-high"></span>
+                    <span class="legend-label">Very High</span>
+                </div>
             </div>
         </div>
+
+        <!-- Legend Toggle Button (when legend is closed) -->
+        <button id="legend-toggle" class="legend-toggle-btn hidden" title="Show Legend">
+            <img src="/static/images/icon-info.png" alt="Info" class="button-icon-small">
+        </button>
     </div>
 
     <!-- Leaflet JavaScript -->
