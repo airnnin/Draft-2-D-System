@@ -46,7 +46,7 @@ class LandslideSusceptibility(models.Model):
         ('MS', 'Moderate Susceptibility'),
         ('HS', 'High Susceptibility'),
         ('VHS', 'Very High Susceptibility'),
-        ('DF', 'Unknown Classification'),
+        ('DF', 'Debris Flow - Critical Risk'),  # FIXED LABEL
     ]
     
     dataset = models.ForeignKey(HazardDataset, on_delete=models.CASCADE)
