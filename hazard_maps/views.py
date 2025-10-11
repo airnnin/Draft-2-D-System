@@ -28,7 +28,7 @@ def upload_shapefile(request):
         uploaded_file = request.FILES['shapefile']
         dataset_type = request.POST['dataset_type']
         
-        valid_types = ['flood', 'landslide', 'liquefaction']
+        valid_types = ['flood', 'landslide', 'liquefaction', 'barangay']
         if dataset_type not in valid_types:
             return JsonResponse({'error': f'Invalid dataset type. Must be one of: {valid_types}'}, status=400)
         
@@ -1120,6 +1120,95 @@ def get_location_info(request):
         location_info = OverpassClient.get_location_info(lat, lng)
         
         return Response(location_info)
+        
+    except ValueError:
+        return Response({'error': 'Invalid coordinates'}, status=400)
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def get_barangay_data(request):
+    """Get barangay boundary data as GeoJSON"""
+    from .models import BarangayBoundary
+    
+    try:
+        barangay_features = []
+        barangay_records = BarangayBoundary.objects.all()
+        
+        for record in barangay_records:
+            feature = {
+                'type': 'Feature',
+                'properties': {
+                    'brgy_id': record.brgy_id,
+                    'barangay_name': record.b_name,
+                    'municipality': record.lgu_name,
+                    'population_2020': record.pop_2020,
+                    'area_hectares': record.hectares,
+                    'district': record.district,
+                    'dataset_id': record.dataset.id
+                },
+                'geometry': json.loads(record.geometry.geojson)
+            }
+            barangay_features.append(feature)
+        
+        geojson_data = {
+            'type': 'FeatureCollection',
+            'features': barangay_features
+        }
+        
+        return Response(geojson_data)
+    
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+def get_barangay_from_point(request):
+    """
+    Get barangay information for a specific point location
+    This replaces Nominatim for accurate barangay identification
+    """
+    from .models import BarangayBoundary
+    from django.contrib.gis.geos import Point
+    
+    try:
+        lat = float(request.GET.get('lat'))
+        lng = float(request.GET.get('lng'))
+        
+        point = Point(lng, lat, srid=4326)
+        
+        # Find which barangay boundary contains this point
+        barangay = BarangayBoundary.objects.filter(
+            geometry__contains=point
+        ).first()
+        
+        if barangay:
+            # Calculate population density
+            population_density = None
+            if barangay.pop_2020 and barangay.hectares and barangay.hectares > 0:
+                population_density = round(barangay.pop_2020 / barangay.hectares, 2)
+            
+            return Response({
+                'success': True,
+                'barangay': barangay.b_name,
+                'municipality': barangay.lgu_name,
+                'province': 'Negros Oriental',
+                'population_2020': barangay.pop_2020,
+                'area_hectares': barangay.hectares,
+                'district': barangay.district,
+                'brgy_code': barangay.brgycode,
+                'population_density': population_density,  # NEW: Population per hectare
+                'full_address': f"{barangay.b_name}, {barangay.lgu_name}, Negros Oriental"
+            })
+        else:
+            # Point is outside all barangay boundaries
+            return Response({
+                'success': False,
+                'barangay': 'Unknown',
+                'municipality': 'Unknown',
+                'province': 'Negros Oriental',
+                'full_address': f"Lat: {lat:.6f}, Lng: {lng:.6f}",
+                'message': 'Location is outside mapped barangay boundaries'
+            })
         
     except ValueError:
         return Response({'error': 'Invalid coordinates'}, status=400)

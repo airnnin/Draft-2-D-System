@@ -1,5 +1,5 @@
 let map;
-let floodLayer, landslideLayer, liquefactionLayer;
+let floodLayer, landslideLayer, liquefactionLayer, barangayLayer;
 let currentMarker;
 let facilityMarkers = L.layerGroup();
 
@@ -21,7 +21,8 @@ function initMap() {
         maxZoom: 19
     }).addTo(map);
 
-    // Create layer groups - only flood visible by default
+    // Create layer groups - barangay and flood visible by default
+    barangayLayer = L.layerGroup().addTo(map);  // NEW: Barangay boundaries
     floodLayer = L.layerGroup().addTo(map);
     landslideLayer = L.layerGroup();
     liquefactionLayer = L.layerGroup();
@@ -29,6 +30,7 @@ function initMap() {
 
     // Load all data upfront for instant toggling
     loadHazardData();
+    loadBarangayBoundaries();
     
     map.on('click', function (e) {
         if (!e.originalEvent.defaultPrevented) {
@@ -36,6 +38,63 @@ function initMap() {
         }
     });
 }
+
+// NEW: Load barangay boundaries
+async function loadBarangayBoundaries() {
+    try {
+        const response = await fetch('/api/barangay-data/');
+        if (response.ok) {
+            const barangayData = await response.json();
+            addBarangayLayer(barangayData);
+        }
+    } catch (error) {
+        console.error('Error loading barangay boundaries:', error);
+    }
+}
+
+// NEW: Add barangay boundary layer
+function addBarangayLayer(geojsonData) {
+    L.geoJSON(geojsonData, {
+        style: function(feature) {
+            return {
+                fillColor: 'transparent',
+                weight: 2,
+                opacity: 0.8,
+                color: '#3b82f6',
+                fillOpacity: 0.05,
+                dashArray: '5, 5'
+            };
+        },
+        onEachFeature: function(feature, layer) {
+            // REMOVED: layer.bindPopup() - No more popup clutter!
+            
+            // Hover effect
+            layer.on('mouseover', function() {
+                layer.setStyle({
+                    fillOpacity: 0.2,
+                    weight: 3,
+                    color: '#2563eb'
+                });
+            });
+            
+            layer.on('mouseout', function() {
+                layer.setStyle({
+                    fillOpacity: 0.05,
+                    weight: 2,
+                    color: '#3b82f6'
+                });
+            });
+            
+            // Click handler - still works but no popup
+            layer.on('click', function(e) {
+                onMapClick(e);
+            });
+            
+            layer.addTo(barangayLayer);
+        }
+    });
+}
+
 
 async function loadHazardData() {
     try {
@@ -104,7 +163,6 @@ function onMapClick(e) {
     currentMarker = L.marker([lat, lng]).addTo(map);
     showLocationInfo(lat, lng);
 }
-
 async function showLocationInfo(lat, lng) {
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -122,28 +180,75 @@ async function showLocationInfo(lat, lng) {
     `;
 
     try {
-        const response = await fetch(`/api/location-info/?lat=${lat}&lng=${lng}`);
+        const response = await fetch(`/api/barangay-from-point/?lat=${lat}&lng=${lng}`);
         const locationData = await response.json();
         
         if (response.ok && locationData.success) {
+            // Format population with commas
+            const population = locationData.population_2020 
+                ? locationData.population_2020.toLocaleString() 
+                : 'N/A';
+            
+            // Format area
+            const area = locationData.area_hectares 
+                ? locationData.area_hectares.toFixed(2) 
+                : 'N/A';
+            
+            // Format district
+            const district = locationData.district 
+                ? locationData.district 
+                : 'N/A';
+            
+            // Format population density
+            const density = locationData.population_density 
+                ? `${locationData.population_density.toLocaleString()} people/hectare` 
+                : 'N/A';
+            
             locationInfo.innerHTML = `
                 <div class="location-header">
                     <div class="location-icon">📍</div>
                     <div class="location-details">
                         <div class="location-barangay">${locationData.barangay}</div>
                         <div class="location-municipality">${locationData.municipality}, ${locationData.province}</div>
-                        <div class="location-coordinates">
+                        
+                        <!-- NEW: Barangay Statistics Section -->
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.8rem; color: #6b7280;">
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">Population (2020):</span><br>
+                                    <span style="color: #1f2937;">${population}</span>
+                                </div>
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">Area:</span><br>
+                                    <span style="color: #1f2937;">${area} ha</span>
+                                </div>
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">District:</span><br>
+                                    <span style="color: #1f2937;">${district}</span>
+                                </div>
+                                <div>
+                                    <span style="font-weight: 600; color: #4b5563;">Density:</span><br>
+                                    <span style="color: #1f2937;">${density}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="location-coordinates" style="margin-top: 0.75rem;">
                             <span>${lat.toFixed(6)}°N, ${lng.toFixed(6)}°E</span>
                         </div>
                     </div>
                 </div>
             `;
         } else {
+            // Fallback if point is outside barangay boundaries
             locationInfo.innerHTML = `
                 <div class="location-header">
                     <div class="location-icon">📍</div>
                     <div class="location-details">
                         <div class="location-barangay">Selected Location</div>
+                        <div style="font-size: 0.85rem; color: #f59e0b; margin: 0.5rem 0;">
+                            ⚠️ Outside mapped barangay boundaries
+                        </div>
                         <div class="location-coordinates">
                             <span>${lat.toFixed(6)}°N, ${lng.toFixed(6)}°E</span>
                         </div>
@@ -537,6 +642,15 @@ function setupLegendControls() {
 }
 
 function setupLayerToggles() {
+    // NEW: Barangay boundary toggle
+    document.getElementById('barangay-toggle').addEventListener('change', function (e) {
+        if (e.target.checked) {
+            map.addLayer(barangayLayer);
+        } else {
+            map.removeLayer(barangayLayer);
+        }
+    });
+
     document.getElementById('flood-toggle').addEventListener('change', function (e) {
         if (e.target.checked) {
             map.addLayer(floodLayer);

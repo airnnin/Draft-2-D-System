@@ -228,24 +228,81 @@ class ShapefileProcessor:
                     continue
                 
         return records_created
-    
+
+    def process_barangay_data(self, shp_file, dataset):
+        """Process barangay boundary shapefile"""
+        from .models import BarangayBoundary
+        
+        records_created = 0
+        
+        with fiona.open(shp_file) as shapefile:
+            print(f"Processing barangay boundaries - CRS: {shapefile.crs}")
+            
+            for idx, feature in enumerate(shapefile):
+                try:
+                    props = feature['properties']
+                    geom = feature['geometry']
+                    
+                    if geom is None:
+                        continue
+                    
+                    # Clean up field values (remove newlines and extra spaces)
+                    b_name = str(props.get('B_NAME', '')).strip().replace('\n', '')
+                    lgu_name = str(props.get('LGU_NAME', '')).strip().replace('\n', '')
+                    nsodata = str(props.get('NSODATA', '')).strip().replace('\n', '')
+                    brgycode = str(props.get('BRGYCODE', '')).strip().replace('\n', '')
+                    
+                    # Convert geometry
+                    geometry = self.transform_geometry(geom, shapefile.crs)
+                    
+                    BarangayBoundary.objects.create(
+                        dataset=dataset,
+                        brgy_id=props.get('BRGY_ID', 0),
+                        brgycode=brgycode,
+                        b_name=b_name,
+                        lgu_name=lgu_name,
+                        area_has=props.get('AREA_HAS_'),
+                        area=props.get('AREA'),
+                        perimeter=props.get('PERIMETER'),
+                        hectares=props.get('HECTARES'),
+                        area_nso=props.get('AREA_NSO'),
+                        district=props.get('DISTRICT'),
+                        pop_2020=props.get('POP_2020'),
+                        nsodata=nsodata,
+                        geometry=geometry
+                    )
+                    records_created += 1
+                    
+                    if records_created % 50 == 0:
+                        print(f"Processed {records_created} barangay boundaries...")
+                    
+                except Exception as e:
+                    print(f"Error processing barangay feature {idx}: {e}")
+                    continue
+        
+        return records_created
+
     def process(self):
         """Main processing method"""
         try:
             shp_file = self.extract_shapefile()
             
+            # Create dataset record
             dataset = HazardDataset.objects.create(
                 name=f"Uploaded {self.dataset_type.title()} Data",
                 dataset_type=self.dataset_type,
                 file_name=self.uploaded_file.name
             )
             
+            # Process based on dataset type
             if self.dataset_type == 'flood':
                 records_created = self.process_flood_data(shp_file, dataset)
             elif self.dataset_type == 'landslide':
                 records_created = self.process_landslide_data(shp_file, dataset)
             elif self.dataset_type == 'liquefaction':
                 records_created = self.process_liquefaction_data(shp_file, dataset)
+            elif self.dataset_type == 'barangay':  # NEW: Handle barangay boundaries
+                records_created = self.process_barangay_data(shp_file, dataset)
             else:
                 raise ValueError(f"Unsupported dataset type: {self.dataset_type}")
             
