@@ -188,9 +188,93 @@ async function getHazardInfoForLocation(lat, lng, container) {
 
         if (response.ok) {
             const overall = data.overall_risk;
+            const suitability = data.suitability;  // NEW: Get suitability data
             
-            // IMPROVED: Better visual hierarchy and clearer information
             let html = `
+                <!-- SUITABILITY SCORE CARD - NEW PRIMARY INDICATOR -->
+                <div class="suitability-card" style="background: linear-gradient(135deg, ${suitability.color}15 0%, ${suitability.color}25 100%); border: 2px solid ${suitability.color}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.07);">
+                    <div style="text-align: center; margin-bottom: 1rem;">
+                        <div style="font-size: 0.75rem; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem;">
+                            Development Suitability
+                        </div>
+                        <div style="font-size: 2.5rem; font-weight: 800; color: ${suitability.color}; line-height: 1; margin-bottom: 0.25rem;">
+                            ${suitability.score}
+                        </div>
+                        <div style="font-size: 0.9rem; color: #9ca3af; font-weight: 600;">/100</div>
+                    </div>
+                    
+                    <div style="width: 100%; height: 14px; background: #e5e7eb; border-radius: 9999px; overflow: hidden; margin-bottom: 1rem; position: relative;">
+                        <div style="width: ${suitability.score}%; height: 100%; background: linear-gradient(90deg, ${suitability.color} 0%, ${adjustColorBrightness(suitability.color, -20)} 100%); transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 8px ${suitability.color}50;"></div>
+                    </div>
+                    
+                    <div style="background: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                        <div style="font-size: 1.1rem; font-weight: 700; color: ${suitability.color}; margin-bottom: 0.5rem; text-align: center;">
+                            ${suitability.category}
+                        </div>
+                        <div style="font-size: 0.875rem; color: #4b5563; text-align: center; line-height: 1.6;">
+                            ${suitability.recommendation}
+                        </div>
+                    </div>
+                    
+                    <!-- Suitability Breakdown -->
+                    <details style="cursor: pointer;">
+                        <summary style="font-size: 0.85rem; color: #6b7280; font-weight: 600; padding: 0.75rem; background: white; border-radius: 6px; margin-bottom: 0.5rem;">
+                            📊 View Score Breakdown
+                        </summary>
+                        <div style="background: white; padding: 1rem; border-radius: 6px; margin-top: 0.5rem;">
+                            <!-- DISASTER SAFETY -->
+                            <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 0.85rem; color: #1f2937; font-weight: 700;">🛡️ Disaster Safety (60%)</span>
+                                    <span style="font-size: 0.9rem; color: ${suitability.color}; font-weight: 700;">${suitability.breakdown.safety}</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+                                    <div style="width: ${(suitability.breakdown.safety / 60) * 100}%; height: 100%; background: ${suitability.color}; transition: width 0.5s;"></div>
+                                </div>
+                                <p style="margin: 0; font-size: 0.75rem; color: #6b7280; line-height: 1.5;">
+                                    ${suitability.breakdown.safety_description}
+                                </p>
+                            </div>
+                            
+                            <!-- ACCESSIBILITY -->
+                            <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #e5e7eb;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 0.85rem; color: #1f2937; font-weight: 700;">🏥 Accessibility (20%)</span>
+                                    <span style="font-size: 0.9rem; color: ${suitability.color}; font-weight: 700;">${suitability.breakdown.accessibility}</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+                                    <div style="width: ${(suitability.breakdown.accessibility / 20) * 100}%; height: 100%; background: ${suitability.color}; transition: width 0.5s;"></div>
+                                </div>
+                                <p style="margin: 0; font-size: 0.75rem; color: #6b7280; line-height: 1.5;">
+                                    ${suitability.breakdown.accessibility_description}
+                                </p>
+                            </div>
+                            
+                            <!-- INFRASTRUCTURE -->
+                            <div style="margin-bottom: 0;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <span style="font-size: 0.85rem; color: #1f2937; font-weight: 700;">🏘️ Infrastructure (20%)</span>
+                                    <span style="font-size: 0.9rem; color: ${suitability.color}; font-weight: 700;">${suitability.breakdown.infrastructure}</span>
+                                </div>
+                                <div style="width: 100%; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden; margin-bottom: 0.5rem;">
+                                    <div style="width: ${(suitability.breakdown.infrastructure / 20) * 100}%; height: 100%; background: ${suitability.color}; transition: width 0.5s;"></div>
+                                </div>
+                                <p style="margin: 0; font-size: 0.75rem; color: #6b7280; line-height: 1.5;">
+                                    ${suitability.breakdown.infrastructure_description}
+                                </p>
+                            </div>
+                            
+                            <!-- EXPLANATION -->
+                            <div style="margin-top: 1rem; padding: 0.75rem; background: #f9fafb; border-radius: 6px; border-left: 3px solid ${suitability.color};">
+                                <p style="margin: 0; font-size: 0.7rem; color: #4b5563; line-height: 1.6;">
+                                    <em>Disaster safety is weighted at 60% to prioritize life safety over convenience.</em>
+                                </p>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                
+            
                 <!-- OVERALL RISK SCORE CARD - Enhanced Design -->
                 <div class="risk-score-card" style="background: linear-gradient(135deg, ${overall.color}15 0%, ${overall.color}25 100%); border: 2px solid ${overall.color}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.07);">
                     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
@@ -208,7 +292,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
                     <!-- Risk Score Bar -->
                     <div class="score-container" style="background: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
                         <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem;">
-                            <span style="font-size: 0.8rem; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">RISK SCORE</span>
+                            <span style="font-size: 0.8rem; color: #6b7280; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;">DISASTER RISK SCORE</span>
                             <div>
                                 <span style="font-size: 2rem; font-weight: 800; color: ${overall.color};">${overall.score}</span>
                                 <span style="font-size: 1.2rem; color: #9ca3af; font-weight: 600;">/100</span>
@@ -224,7 +308,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
                         ${overall.safety_level}
                     </div>
                     
-<!-- Collapsible Recommendation Button -->
+                    <!-- Collapsible Recommendation Button -->
                     <div class="recommendation-box" style="background: white; border-left: 4px solid ${overall.color}; border-radius: 6px; padding: 0; overflow: hidden; margin-top: 1rem;">
                         <button 
                             onclick="toggleRecommendations()" 
@@ -247,7 +331,6 @@ async function getHazardInfoForLocation(lat, lng, container) {
                             </div>
                         </div>
                     </div>
-                </div>
                 </div>
 
                 <!-- INDIVIDUAL HAZARD BREAKDOWN - Always Visible -->
@@ -286,7 +369,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
                 data.landslide.level
             );
 
-            // LIQUEFACTION HAZARD CARD (FIXED LABEL)
+            // LIQUEFACTION HAZARD CARD
             const liquefactionColor = getColorForLevel(data.liquefaction.level);
             const liquefactionSeverity = getSeverityLevel(data.liquefaction.level);
             html += createHazardCard(

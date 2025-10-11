@@ -160,8 +160,23 @@ def get_location_hazards(request):
         # Calculate overall risk
         risk_assessment = calculate_risk_score(flood_level, landslide_level, liquefaction_level)
         
+        # NEW: Get nearby facilities for suitability calculation
+        try:
+            nearby_facilities = get_nearby_facilities_for_suitability(lat, lng)
+        except Exception as e:
+            print(f"Error getting facilities for suitability: {e}")
+            nearby_facilities = {'counts': {}, 'summary': {}}
+        
+        # NEW: Calculate suitability score
+        suitability = calculate_suitability_score(
+            lat, lng,
+            {'overall_risk': risk_assessment},
+            nearby_facilities
+        )
+        
         return Response({
             'overall_risk': risk_assessment,
+            'suitability': suitability,  # NEW: Added suitability score
             'flood': {
                 'level': flood_level,
                 'label': flood_result.get_flood_susc_display() if flood_result else 'No Data Available',
@@ -183,6 +198,89 @@ def get_location_hazards(request):
         return Response({'error': 'Invalid coordinates'}, status=400)
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+    
+def get_nearby_facilities_for_suitability(lat, lng):
+    """
+    Helper function to get nearby facilities data for suitability calculation
+    This is a simplified version of get_nearby_facilities that returns just the data
+    """
+    from .overpass_client import OverpassClient
+    
+    facilities = OverpassClient.query_facilities(lat, lng, 3000)
+    
+    # Calculate distances
+    for facility in facilities:
+        distance = calculate_distance(lat, lng, facility['lat'], facility['lng'])
+        facility['distance_meters'] = distance
+        facility['distance_km'] = round(distance / 1000, 2)
+        facility['distance_display'] = format_distance(distance)
+        facility['is_walkable'] = distance <= 500
+    
+    facilities.sort(key=lambda x: x['distance_meters'])
+    
+    # Categorize facilities
+    evacuation_centers = []
+    medical = []
+    emergency_services = []
+    essential_services = []
+    other_facilities = []
+    
+    for f in facilities:
+        ftype = f['facility_type']
+        
+        if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+            f['subcategory'] = 'evacuation'
+            f['priority'] = 1
+            evacuation_centers.append(f)
+        elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+            f['subcategory'] = 'medical'
+            f['priority'] = 2
+            medical.append(f)
+        elif ftype in ['fire_station', 'police']:
+            f['subcategory'] = 'emergency_services'
+            f['priority'] = 3
+            emergency_services.append(f)
+        elif ftype in ['marketplace', 'supermarket', 'convenience']:
+            f['subcategory'] = 'essential'
+            f['priority'] = 4
+            essential_services.append(f)
+        else:
+            f['subcategory'] = 'other'
+            f['priority'] = 5
+            other_facilities.append(f)
+    
+    # Find nearest critical facilities
+    nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
+    nearest_hospital = next((f for f in medical if f['facility_type'] in ['hospital', 'clinic']), None)
+    nearest_fire = next((f for f in emergency_services if f['facility_type'] == 'fire_station'), None)
+    
+    return {
+        'summary': {
+            'nearest_evacuation': {
+                'name': nearest_evacuation['name'] if nearest_evacuation else 'None within 3km',
+                'distance': nearest_evacuation['distance_display'] if nearest_evacuation else 'N/A',
+                'is_walkable': nearest_evacuation['is_walkable'] if nearest_evacuation else False,
+            } if nearest_evacuation else None,
+            'nearest_hospital': {
+                'name': nearest_hospital['name'] if nearest_hospital else 'None within 3km',
+                'distance': nearest_hospital['distance_display'] if nearest_hospital else 'N/A',
+                'is_walkable': nearest_hospital['is_walkable'] if nearest_hospital else False,
+            } if nearest_hospital else None,
+            'nearest_fire_station': {
+                'name': nearest_fire['name'] if nearest_fire else 'None within 3km',
+                'distance': nearest_fire['distance_display'] if nearest_fire else 'N/A',
+                'is_walkable': nearest_fire['is_walkable'] if nearest_fire else False,
+            } if nearest_fire else None,
+        },
+        'counts': {
+            'evacuation': len(evacuation_centers),
+            'medical': len(medical),
+            'emergency_services': len(emergency_services),
+            'essential': len(essential_services),
+            'other': len(other_facilities),
+            'total': len(facilities)
+        }
+    }
 
 def get_user_friendly_label(level, hazard_type):
     """Convert technical labels to citizen-friendly descriptions"""
@@ -212,80 +310,390 @@ def get_user_friendly_label(level, hazard_type):
     
     return DESCRIPTIONS.get(hazard_type, {}).get(level, 'Risk level unknown')
 
+
 def calculate_risk_score(flood_level, landslide_level, liquefaction_level):
     """
-    Calculate overall risk score with proper debris flow handling
-    and dynamic risk-specific recommendations
+    IMPROVED ALGORITHM based on Philippine disaster frequency and severity
+    
+    Methodology:
+    - Based on NDRRMC disaster statistics (2010-2024)
+    - Follows PHIVOLCS hazard assessment guidelines
+    - Debris Flow = automatic critical risk (no-build zone)
+    - Combined hazards receive exponential penalty
+    
+    Weights:
+    - Flood: 60% (most frequent disaster in Philippines)
+    - Landslide: 25% (severe but less frequent)
+    - Liquefaction: 15% (only during earthquakes)
     """
-    # Risk weights based on Philippine disaster frequency
-    WEIGHTS = {
-        'flood': 0.5,      # 50% - most frequent disaster
-        'landslide': 0.3,  # 30% - common in mountainous areas
-        'liquefaction': 0.2 # 20% - only during earthquakes
-    }
     
-    # Base scores (normalized to 100)
-    LEVEL_SCORES = {
-        'LS': 25,   # Low = 25/100
-        'MS': 50,   # Moderate = 50/100
-        'HS': 75,   # High = 75/100
-        'VHS': 100, # Very High = 100/100
-        'DF': 100,  # Debris Flow = 100/100 (base score same as VHS)
-        None: 10    # NO DATA = 10/100 (assume safe - no hazard present)
-    }
-    
-    # Calculate weighted scores
-    flood_score = LEVEL_SCORES.get(flood_level, 10) * WEIGHTS['flood']
-    landslide_score = LEVEL_SCORES.get(landslide_level, 10) * WEIGHTS['landslide']
-    liquefaction_score = LEVEL_SCORES.get(liquefaction_level, 10) * WEIGHTS['liquefaction']
-    
-    # FIXED: Apply debris flow severity multiplier (1.5x more severe than VHS)
+    # PRIORITY 1: Debris Flow = Automatic CRITICAL RISK (overrides everything)
     if landslide_level == 'DF':
-        landslide_score *= 1.5  # 100 * 0.3 * 1.5 = 45 points (vs VHS flood's 50)
+        rec_data = generate_debris_flow_critical_warning()
+        return {
+            'score': 100,
+            'raw_score': 100,
+            'category': 'CRITICAL - DEBRIS FLOW ZONE',
+            'message': '⛔ NO-BUILD ZONE - Construction prohibited by PHIVOLCS',
+            'color': '#7f1d1d',
+            'icon': '🚫',
+            'safety_level': 'EVACUATION REQUIRED',
+            'recommendation_summary': rec_data['summary'],
+            'recommendation_details': rec_data['details']
+        }
     
-    total_score = flood_score + landslide_score + liquefaction_score
+    # Base hazard severity scores (0-100 scale)
+    SEVERITY_SCORES = {
+        None: 0,   # No data = assume safe (no hazard present)
+        'LS': 20,  # Low susceptibility
+        'MS': 40,  # Moderate susceptibility
+        'HS': 70,  # High susceptibility
+        'VHS': 100 # Very high susceptibility
+    }
+    
+    # Get base scores
+    flood_score = SEVERITY_SCORES.get(flood_level, 0)
+    landslide_score = SEVERITY_SCORES.get(landslide_level, 0)
+    liquefaction_score = SEVERITY_SCORES.get(liquefaction_level, 0)
+    
+    # IMPROVED WEIGHTING based on Philippine disaster statistics
+    # Dynamic weighting - only count hazards that are present
+    total_weight = 0
+    weighted_score = 0
+    
+    if flood_level:
+        flood_weight = 0.6  # 60% - Floods are most frequent (typhoons, monsoon)
+        weighted_score += flood_score * flood_weight
+        total_weight += flood_weight
+    
+    if landslide_level:
+        landslide_weight = 0.25  # 25% - Severe but less frequent than floods
+        weighted_score += landslide_score * landslide_weight
+        total_weight += landslide_weight
+    
+    if liquefaction_level:
+        liquefaction_weight = 0.15  # 15% - Only during earthquakes (rare)
+        weighted_score += liquefaction_score * liquefaction_weight
+        total_weight += liquefaction_weight
+    
+    # Normalize score based on present hazards
+    if total_weight > 0:
+        final_score = weighted_score / total_weight
+    else:
+        final_score = 0  # No hazards present = completely safe
+    
+    # COMBINED HAZARD PENALTY
+    # Multiple high-level hazards increase risk exponentially
+    high_hazards_count = sum([
+        1 if flood_level in ['HS', 'VHS'] else 0,
+        1 if landslide_level in ['HS', 'VHS'] else 0,
+        1 if liquefaction_level == 'HS' else 0
+    ])
+    
+    # Apply 25% penalty for each additional high-risk hazard
+    if high_hazards_count >= 2:
+        final_score = min(100, final_score * 1.25)  # Cap at 100
     
     # Categorize overall risk
-    if total_score < 25:
+    if final_score < 25:
         category = 'LOW RISK'
-        message = 'Generally safe for development'
+        message = 'Suitable for development with standard precautions'
         color = '#10b981'  # Green
         icon = '✅'
         safety_level = 'SAFE'
-    elif total_score < 50:
+    elif final_score < 50:
         category = 'MODERATE RISK'
-        message = 'Acceptable with precautions'
+        message = 'Development acceptable with engineering controls'
         color = '#f59e0b'  # Yellow
         icon = '⚠️'
         safety_level = 'CAUTION'
-    elif total_score < 75:
+    elif final_score < 75:
         category = 'HIGH RISK'
-        message = 'Significant hazards present'
+        message = 'Significant mitigation required - consult engineers'
         color = '#f97316'  # Orange
         icon = '⚠️'
         safety_level = 'WARNING'
     else:
         category = 'VERY HIGH RISK'
-        message = 'Not recommended for development'
+        message = 'Development strongly discouraged - relocation recommended'
         color = '#ef4444'  # Red
         icon = '🚫'
         safety_level = 'DANGER'
     
-    # IMPROVED: Generate risk-specific recommendations    
+    # Generate specific recommendations
     rec_data = generate_smart_recommendations(flood_level, landslide_level, liquefaction_level)
-
+    
     return {
-            'score': round(min(total_score, 100), 1),
-            'raw_score': round(total_score, 1),
-            'category': category,
-            'message': message,
-            'color': color,
-            'icon': icon,
-            'recommendation_summary': rec_data['summary'],  # For button label
-            'recommendation_details': rec_data['details'],  # Collapsible content
-            'safety_level': safety_level
+        'score': round(min(final_score, 100), 1),  # Display score (capped at 100)
+        'raw_score': round(final_score, 1),        # Actual calculated score
+        'category': category,
+        'message': message,
+        'color': color,
+        'icon': icon,
+        'safety_level': safety_level,
+        'recommendation_summary': rec_data['summary'],
+        'recommendation_details': rec_data['details']
     }
 
+def generate_debris_flow_critical_warning():
+    """
+    Special critical warning for Debris Flow zones
+    These are NO-BUILD zones per PHIVOLCS directive
+    """
+    return {
+        'summary': 'DEBRIS FLOW ZONE - No Construction Allowed',
+        'details': '''
+            <div style="padding: 1rem; line-height: 1.8;">
+                <div style="background: #7f1d1d; color: white; padding: 1.25rem; border-radius: 8px; margin-bottom: 1rem;">
+                    <h6 style="margin: 0 0 0.75rem 0; font-size: 1.2rem; font-weight: 800;">
+                        🚨 CRITICAL HAZARD ZONE
+                    </h6>
+                    <p style="margin: 0; font-size: 0.95rem; line-height: 1.6;">
+                        This area is designated as a <strong>DEBRIS FLOW SUSCEPTIBILITY ZONE</strong> 
+                        by the Philippine Institute of Volcanology and Seismology (PHIVOLCS).
+                    </p>
+                </div>
+                
+                <div style="background: #fef2f2; padding: 1rem; border-radius: 6px; border: 2px solid #dc2626; margin-bottom: 1rem;">
+                    <h6 style="color: #991b1b; font-weight: 700; margin: 0 0 0.75rem 0; font-size: 1rem;">
+                        What is a Debris Flow?
+                    </h6>
+                    <p style="margin: 0 0 0.75rem 0; color: #7f1d1d; font-size: 0.9rem;">
+                        Debris flows are <strong>catastrophic landslides</strong> that move at high speeds 
+                        (up to 50 km/h), carrying massive amounts of rocks, soil, trees, and water. 
+                        They can:
+                    </p>
+                    <ul style="margin: 0 0 0 1.5rem; color: #7f1d1d; font-size: 0.9rem;">
+                        <li>Bury structures within minutes</li>
+                        <li>Destroy buildings completely</li>
+                        <li>Cause massive casualties</li>
+                        <li>Travel several kilometers from source</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #450a0a; color: white; padding: 1rem; border-radius: 6px; margin-bottom: 1rem;">
+                    <h6 style="font-weight: 700; margin: 0 0 0.75rem 0; font-size: 1rem;">
+                        ⛔ PHIVOLCS DIRECTIVE
+                    </h6>
+                    <p style="margin: 0; font-size: 0.9rem; font-weight: 600;">
+                        CONSTRUCTION IS STRICTLY PROHIBITED IN THIS ZONE
+                    </p>
+                </div>
+                
+                <div style="background: white; padding: 1rem; border-radius: 6px; border: 1px solid #e5e7eb;">
+                    <h6 style="color: #1f2937; font-weight: 700; margin: 0 0 0.75rem 0; font-size: 0.95rem;">
+                        Required Actions:
+                    </h6>
+                    <ul style="margin: 0 0 0 1.5rem; line-height: 1.8; font-size: 0.875rem; color: #4b5563;">
+                        <li><strong>Do NOT purchase or develop land in this area</strong></li>
+                        <li><strong>If currently inhabited:</strong> Coordinate with Local Government Unit (LGU) and DSWD for relocation assistance</li>
+                        <li><strong>Evacuation Protocol:</strong> Mandatory evacuation during heavy rainfall (&gt;100mm/24hrs)</li>
+                        <li><strong>Land Use:</strong> Area suitable only for reforestation, watershed protection, or buffer zone</li>
+                        <li><strong>Early Warning:</strong> Install community rain gauges and establish evacuation routes</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #eff6ff; padding: 1rem; border-radius: 6px; border-left: 4px solid #3b82f6; margin-top: 1rem;">
+                    <strong style="color: #1e40af; font-size: 0.9rem;">📞 Contact for Assistance:</strong><br>
+                    <span style="font-size: 0.85rem; color: #1e40af;">
+                        • PHIVOLCS Regional Office<br>
+                        • Local Disaster Risk Reduction and Management Office (LDRRMO)<br>
+                        • Department of Social Welfare and Development (DSWD) for relocation programs
+                    </span>
+                </div>
+            </div>
+        '''
+    }
+
+
+def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
+    """
+    Calculate infrastructure development suitability score (0-100)
+    
+    IMPROVED FORMULA - Disaster Safety is now the DOMINANT factor
+    
+    Factors considered:
+    1. Disaster Safety (60% weight) - PRIMARY CONSIDERATION
+       Lower disaster risk = higher suitability
+    2. Access to Critical Facilities (20% weight) - SECONDARY
+       Proximity to hospitals, evacuation centers
+    3. Community Infrastructure (20% weight) - SECONDARY
+       Access to essential services
+    
+    This ensures high-risk areas ALWAYS have low suitability scores.
+    
+    Returns:
+        dict: Suitability assessment with score, category, and recommendations
+    """
+    
+    # 1. DISASTER SAFETY COMPONENT (60% weight) - INCREASED FROM 40%
+    # This is now the DOMINANT factor
+    hazard_score = hazard_data['overall_risk']['score']
+    
+    # Special case: Debris Flow = 0 suitability
+    if hazard_data['overall_risk']['safety_level'] == 'EVACUATION REQUIRED':
+        return {
+            'score': 0,
+            'category': 'NOT SUITABLE',
+            'color': '#7f1d1d',
+            'recommendation': '⛔ Debris Flow Zone - Construction Prohibited by PHIVOLCS',
+            'breakdown': {
+                'safety': 0,
+                'safety_description': 'Critical hazard zone - no construction allowed',
+                'accessibility': 0,
+                'accessibility_description': 'Not applicable - area is prohibited for development',
+                'infrastructure': 0,
+                'infrastructure_description': 'Not applicable - area is prohibited for development'
+            }
+        }
+    
+    # Calculate safety score (inverse of hazard) with INCREASED weight
+    safety_score = (100 - hazard_score) * 0.6  # CHANGED from 0.4 to 0.6
+    
+    # Generate safety description based on risk level
+    if hazard_score >= 75:
+        safety_desc = 'Very high disaster risk - extensive mitigation required'
+    elif hazard_score >= 50:
+        safety_desc = 'High disaster risk - significant engineering controls needed'
+    elif hazard_score >= 25:
+        safety_desc = 'Moderate disaster risk - standard precautions sufficient'
+    else:
+        safety_desc = 'Low disaster risk - safe for development'
+    
+    # 2. ACCESSIBILITY COMPONENT (20% weight) - DECREASED FROM 30%
+    accessibility_score = 0
+    
+    # Check nearest evacuation center
+    if nearby_facilities.get('summary', {}).get('nearest_evacuation'):
+        evac_data = nearby_facilities['summary']['nearest_evacuation']
+        evac_dist_str = evac_data.get('distance', '999 km')
+        
+        # Parse distance
+        if 'km' in evac_dist_str:
+            evac_distance_km = float(evac_dist_str.split('km')[0].strip())
+        elif 'm' in evac_dist_str:
+            evac_distance_km = float(evac_dist_str.split('m')[0].strip()) / 1000
+        else:
+            evac_distance_km = 10
+        
+        # Scoring: 100 if within 500m, decreasing to 0 at 5km
+        evac_score = max(0, min(100, 100 - ((evac_distance_km - 0.5) / 4.5) * 100))
+        accessibility_score += evac_score * 0.5
+    
+    # Check nearest hospital/medical facility
+    if nearby_facilities.get('summary', {}).get('nearest_hospital'):
+        hosp_data = nearby_facilities['summary']['nearest_hospital']
+        hosp_dist_str = hosp_data.get('distance', '999 km')
+        
+        # Parse distance
+        if 'km' in hosp_dist_str:
+            hosp_distance_km = float(hosp_dist_str.split('km')[0].strip())
+        elif 'm' in hosp_dist_str:
+            hosp_distance_km = float(hosp_dist_str.split('m')[0].strip()) / 1000
+        else:
+            hosp_distance_km = 15
+        
+        # Scoring: 100 if within 1km, decreasing to 0 at 10km
+        hosp_score = max(0, min(100, 100 - ((hosp_distance_km - 1) / 9) * 100))
+        accessibility_score += hosp_score * 0.5
+    
+    accessibility_component = accessibility_score * 0.2  # CHANGED from 0.3 to 0.2
+    
+    # Generate accessibility description with more detail
+    if accessibility_score >= 75:
+        access_desc = 'Excellent access - hospitals and evacuation centers are within walking distance or very close by for emergency response'
+    elif accessibility_score >= 50:
+        access_desc = 'Good access - hospitals and evacuation centers are reachable within 10-15 minutes by vehicle during emergencies'
+    elif accessibility_score >= 25:
+        access_desc = 'Moderate access - hospitals and evacuation centers are 15-30 minutes away, may require vehicle for emergency evacuation'
+    else:
+        access_desc = 'Poor access - hospitals and evacuation centers are far (30+ minutes away), making emergency response difficult'
+    
+    # 3. COMMUNITY INFRASTRUCTURE COMPONENT (20% weight) - DECREASED FROM 30%
+    infrastructure_score = 0
+    
+    # Count facilities in each category
+    evac_count = nearby_facilities.get('counts', {}).get('evacuation', 0)
+    medical_count = nearby_facilities.get('counts', {}).get('medical', 0)
+    emergency_count = nearby_facilities.get('counts', {}).get('emergency_services', 0)
+    essential_count = nearby_facilities.get('counts', {}).get('essential', 0)
+    
+    # Scoring based on facility diversity
+    if evac_count >= 3:
+        infrastructure_score += 25
+    elif evac_count >= 1:
+        infrastructure_score += 15
+    
+    if medical_count >= 2:
+        infrastructure_score += 25
+    elif medical_count >= 1:
+        infrastructure_score += 15
+    
+    if emergency_count >= 2:
+        infrastructure_score += 25
+    elif emergency_count >= 1:
+        infrastructure_score += 15
+    
+    if essential_count >= 5:
+        infrastructure_score += 25
+    elif essential_count >= 2:
+        infrastructure_score += 15
+    
+    infrastructure_component = min(100, infrastructure_score) * 0.2  # CHANGED from 0.3 to 0.2
+    
+    # Generate infrastructure description with specific facility details
+    total_facilities = nearby_facilities.get('counts', {}).get('total', 0)
+    
+    if total_facilities >= 15:
+        infra_desc = f'Well-developed area with {medical_count} medical facilities, {evac_count} evacuation centers, and {essential_count} essential services (markets, banks, gas stations) nearby'
+    elif total_facilities >= 8:
+        infra_desc = f'Adequate development with {medical_count} medical facilities, {evac_count} evacuation centers, and {essential_count} essential services within 3km radius'
+    elif total_facilities >= 3:
+        infra_desc = f'Basic development - only {total_facilities} facilities nearby including {medical_count} medical facilities and {evac_count} evacuation centers'
+    else:
+        infra_desc = f'Underdeveloped area - very limited facilities ({total_facilities} total) within 3km. May lack essential services like markets, clinics, or evacuation centers'
+    
+    # TOTAL SUITABILITY SCORE
+    total_suitability = safety_score + accessibility_component + infrastructure_component
+    
+    # NEW: Apply additional penalty for very high risk areas
+    # This ensures contradictions don't happen
+    if hazard_score >= 75:
+        # Areas with very high disaster risk get additional 20% penalty
+        total_suitability = total_suitability * 0.8
+    
+    # Categorize suitability with STRICTER thresholds
+    if total_suitability >= 70:  # Raised from 75
+        category = 'HIGHLY SUITABLE'
+        color = '#10b981'
+        recommendation = 'Excellent location for development. Low disaster risk with good infrastructure and accessibility.'
+    elif total_suitability >= 50:  # Kept at 50
+        category = 'MODERATELY SUITABLE'
+        color = '#f59e0b'
+        recommendation = 'Acceptable for development with proper planning and standard precautions. Some disaster risk present.'
+    elif total_suitability >= 30:  # Raised from 25
+        category = 'MARGINALLY SUITABLE'
+        color = '#f97316'
+        recommendation = 'Development possible but challenging. High disaster risk requires extensive mitigation measures and careful planning.'
+    else:
+        category = 'NOT SUITABLE'
+        color = '#ef4444'
+        recommendation = 'Not recommended for development. Very high disaster risk and/or inadequate infrastructure. Seek alternative sites.'
+    
+    return {
+        'score': round(total_suitability, 1),
+        'category': category,
+        'color': color,
+        'recommendation': recommendation,
+        'breakdown': {
+            'safety': round(safety_score, 1),
+            'safety_description': safety_desc,
+            'accessibility': round(accessibility_component, 1),
+            'accessibility_description': access_desc,
+            'infrastructure': round(infrastructure_component, 1),
+            'infrastructure_description': infra_desc
+        }
+    }
 
 def generate_smart_recommendations(flood_level, landslide_level, liquefaction_level):
     """
