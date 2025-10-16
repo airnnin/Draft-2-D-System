@@ -4,8 +4,9 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.contrib.gis.geos import Point
-from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility
+from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility, BarangayBoundaryNew
 from .utils import ShapefileProcessor
+from .utils import HybridDistanceCalculator
 from .overpass_client import OverpassClient
 from math import radians, cos, sin, asin, sqrt
 import json
@@ -28,9 +29,12 @@ def upload_shapefile(request):
         uploaded_file = request.FILES['shapefile']
         dataset_type = request.POST['dataset_type']
         
-        valid_types = ['flood', 'landslide', 'liquefaction', 'barangay']
+        # FIXED: Include barangay_new in valid types
+        valid_types = ['flood', 'landslide', 'liquefaction', 'barangay', 'barangay_new']
         if dataset_type not in valid_types:
-            return JsonResponse({'error': f'Invalid dataset type. Must be one of: {valid_types}'}, status=400)
+            return JsonResponse({
+                'error': f'Invalid dataset type. Must be one of: {valid_types}'
+            }, status=400)
         
         processor = ShapefileProcessor(uploaded_file, dataset_type)
         result = processor.process()
@@ -199,88 +203,273 @@ def get_location_hazards(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
     
-def get_nearby_facilities_for_suitability(lat, lng):
-    """
-    Helper function to get nearby facilities data for suitability calculation
-    This is a simplified version of get_nearby_facilities that returns just the data
-    """
-    from .overpass_client import OverpassClient
-    
-    facilities = OverpassClient.query_facilities(lat, lng, 3000)
-    
-    # Calculate distances
-    for facility in facilities:
-        distance = calculate_distance(lat, lng, facility['lat'], facility['lng'])
-        facility['distance_meters'] = distance
-        facility['distance_km'] = round(distance / 1000, 2)
-        facility['distance_display'] = format_distance(distance)
-        facility['is_walkable'] = distance <= 500
-    
-    facilities.sort(key=lambda x: x['distance_meters'])
-    
-    # Categorize facilities
-    evacuation_centers = []
-    medical = []
-    emergency_services = []
-    essential_services = []
-    other_facilities = []
-    
-    for f in facilities:
-        ftype = f['facility_type']
+@api_view(['GET'])
+def get_nearby_facilities(request):
+    """Get facilities within specified radius with disaster-priority grouping - FIXED VERSION"""
+    try:
+        lat = float(request.GET.get('lat'))
+        lng = float(request.GET.get('lng'))
+        radius = int(request.GET.get('radius', 3000))
         
-        if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
-            f['subcategory'] = 'evacuation'
-            f['priority'] = 1
-            evacuation_centers.append(f)
-        elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
-            f['subcategory'] = 'medical'
-            f['priority'] = 2
-            medical.append(f)
-        elif ftype in ['fire_station', 'police']:
-            f['subcategory'] = 'emergency_services'
-            f['priority'] = 3
-            emergency_services.append(f)
-        elif ftype in ['marketplace', 'supermarket', 'convenience']:
-            f['subcategory'] = 'essential'
-            f['priority'] = 4
-            essential_services.append(f)
-        else:
-            f['subcategory'] = 'other'
-            f['priority'] = 5
-            other_facilities.append(f)
-    
-    # Find nearest critical facilities
-    nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
-    nearest_hospital = next((f for f in medical if f['facility_type'] in ['hospital', 'clinic']), None)
-    nearest_fire = next((f for f in emergency_services if f['facility_type'] == 'fire_station'), None)
-    
-    return {
-        'summary': {
-            'nearest_evacuation': {
-                'name': nearest_evacuation['name'] if nearest_evacuation else 'None within 3km',
-                'distance': nearest_evacuation['distance_display'] if nearest_evacuation else 'N/A',
-                'is_walkable': nearest_evacuation['is_walkable'] if nearest_evacuation else False,
-            } if nearest_evacuation else None,
-            'nearest_hospital': {
-                'name': nearest_hospital['name'] if nearest_hospital else 'None within 3km',
-                'distance': nearest_hospital['distance_display'] if nearest_hospital else 'N/A',
-                'is_walkable': nearest_hospital['is_walkable'] if nearest_hospital else False,
-            } if nearest_hospital else None,
-            'nearest_fire_station': {
-                'name': nearest_fire['name'] if nearest_fire else 'None within 3km',
-                'distance': nearest_fire['distance_display'] if nearest_fire else 'N/A',
-                'is_walkable': nearest_fire['is_walkable'] if nearest_fire else False,
-            } if nearest_fire else None,
-        },
-        'counts': {
-            'evacuation': len(evacuation_centers),
-            'medical': len(medical),
-            'emergency_services': len(emergency_services),
-            'essential': len(essential_services),
-            'other': len(other_facilities),
-            'total': len(facilities)
+        # Get facilities from Overpass
+        facilities = OverpassClient.query_facilities(lat, lng, radius)
+        
+        # VALIDATION: Check if we got any facilities
+        if not facilities or len(facilities) == 0:
+            return Response({
+                'error': 'No facilities found in this area',
+                'summary': {
+                    'nearest_evacuation': None,
+                    'nearest_hospital': None,
+                    'nearest_fire_station': None,
+                },
+                'evacuation_centers': [],
+                'medical': [],
+                'emergency_services': [],
+                'essential_services': [],
+                'other': [],
+                'counts': {
+                    'evacuation': 0,
+                    'medical': 0,
+                    'emergency_services': 0,
+                    'essential': 0,
+                    'other': 0,
+                    'total': 0
+                }
+            })
+        
+        # Calculate distances using HybridDistanceCalculator
+        from .utils import HybridDistanceCalculator
+        facilities = HybridDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
+        
+        # CRITICAL: Ensure all required fields exist
+        for f in facilities:
+            # Add missing fields with defaults if not present
+            if 'distance_display' not in f:
+                f['distance_display'] = format_distance(f.get('distance_meters', 0))
+            if 'duration_display' not in f:
+                duration_min = f.get('duration_minutes', 0)
+                f['duration_display'] = f"{int(duration_min)} min" if duration_min >= 1 else "< 1 min"
+            if 'is_walkable' not in f:
+                f['is_walkable'] = f.get('distance_meters', 9999) <= 500
+        
+        # Sort by distance
+        facilities.sort(key=lambda x: x.get('distance_meters', 999999))
+        
+        # Reorganize by disaster priority - IMPROVED CATEGORIZATION
+        evacuation_centers = []
+        medical = []
+        emergency_services = []
+        essential_services = []
+        other_facilities = []
+        
+        for f in facilities:
+            # Get subcategory (pre-assigned by Overpass)
+            subcat = f.get('subcategory', '')
+            ftype = f.get('facility_type', '')
+            
+            # Categorize facilities
+            if subcat == 'evacuation' or ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                f['subcategory'] = 'evacuation'
+                evacuation_centers.append(f)
+            elif subcat == 'medical' or ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                f['subcategory'] = 'medical'
+                medical.append(f)
+            elif subcat == 'emergency_services' or ftype in ['fire_station', 'police']:
+                f['subcategory'] = 'emergency_services'
+                emergency_services.append(f)
+            elif subcat == 'essential' or ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel', 
+                          'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                f['subcategory'] = 'essential'
+                essential_services.append(f)
+            else:
+                f['subcategory'] = 'other'
+                other_facilities.append(f)
+
+        # DEBUG LOGGING
+        print(f"📊 Categorization Results:")
+        print(f"   - Evacuation: {len(evacuation_centers)}")
+        print(f"   - Medical: {len(medical)}")
+        print(f"   - Emergency Services: {len(emergency_services)}")
+        print(f"   - Essential Services: {len(essential_services)}")
+        print(f"   - Other: {len(other_facilities)}")
+        
+        # FIXED: Find nearest of each critical type (NO DUPLICATES)
+        nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
+        nearest_hospital = medical[0] if medical else None  # FIXED: Take first medical facility
+        nearest_fire = next((f for f in emergency_services if f.get('facility_type') == 'fire_station'), None)
+        
+        # CRITICAL FIX: Build summary with proper null handling
+        def build_facility_summary(facility):
+            """Helper to build facility summary with all required fields"""
+            if not facility:
+                return None
+            
+            return {
+                'name': facility.get('name', 'Unknown'),
+                'distance': facility.get('distance_display', 'N/A'),
+                'distance_meters': facility.get('distance_meters', 999999),
+                'duration': facility.get('duration_display', 'N/A'),
+                'is_walkable': facility.get('is_walkable', False),
+            }
+        
+        result = {
+            'summary': {
+                'nearest_evacuation': build_facility_summary(nearest_evacuation),
+                'nearest_hospital': build_facility_summary(nearest_hospital),
+                'nearest_fire_station': build_facility_summary(nearest_fire),
+            },
+            'evacuation_centers': evacuation_centers[:10],
+            'medical': medical[:10],
+            'emergency_services': emergency_services[:10],
+            'essential_services': essential_services[:10],
+            'other': other_facilities[:10],
+            'counts': {
+                'evacuation': len(evacuation_centers),
+                'medical': len(medical),
+                'emergency_services': len(emergency_services),
+                'essential': len(essential_services),
+                'other': len(other_facilities),
+                'total': len(facilities)
+            }
         }
-    }
+        
+        return Response(result)
+        
+    except ValueError:
+        return Response({'error': 'Invalid coordinates or radius'}, status=400)
+    except Exception as e:
+        print(f"❌ Error in get_nearby_facilities: {e}")
+        import traceback
+        traceback.print_exc()
+        return Response({'error': str(e)}, status=500)
+
+def get_nearby_facilities_for_suitability(lat, lng):
+    """Helper function for suitability calculation"""
+    from .overpass_client import OverpassClient
+    from .utils import HybridDistanceCalculator
+    
+    try:
+        facilities = OverpassClient.query_facilities(lat, lng, 3000)
+        
+        if not facilities:
+            return {
+                'summary': {
+                    'nearest_evacuation': None,
+                    'nearest_hospital': None,
+                    'nearest_fire_station': None,
+                },
+                'counts': {
+                    'evacuation': 0,
+                    'medical': 0,
+                    'emergency_services': 0,
+                    'essential': 0,
+                    'other': 0,
+                    'total': 0
+                }
+            }
+        
+        facilities = HybridDistanceCalculator.batch_calculate_distances(lat, lng, facilities)
+        
+        for facility in facilities:
+            if 'distance_display' not in facility:
+                facility['distance_display'] = format_distance(facility.get('distance_meters', 0))
+            if 'is_walkable' not in facility:
+                facility['is_walkable'] = facility.get('distance_meters', 9999) <= 500
+            if 'duration_display' not in facility:
+                duration_min = facility.get('duration_minutes', 0)
+                facility['duration_display'] = f"{int(duration_min)} min" if duration_min >= 1 else "< 1 min"
+        
+        facilities.sort(key=lambda x: x.get('distance_meters', 999999))
+        
+        # SAME IMPROVED CATEGORIZATION as above
+        evacuation_centers = []
+        medical = []
+        emergency_services = []
+        essential_services = []
+        other_facilities = []
+        
+        for f in facilities:
+            subcat = f.get('subcategory', '')
+            
+            if subcat == 'evacuation':
+                evacuation_centers.append(f)
+            elif subcat == 'medical':
+                medical.append(f)
+            elif subcat == 'emergency_services':
+                emergency_services.append(f)
+            elif subcat == 'essential':
+                essential_services.append(f)
+            else:
+                ftype = f.get('facility_type', '')
+                
+                if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
+                    f['subcategory'] = 'evacuation'
+                    evacuation_centers.append(f)
+                elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
+                    f['subcategory'] = 'medical'
+                    medical.append(f)
+                elif ftype in ['fire_station', 'police']:
+                    f['subcategory'] = 'emergency_services'
+                    emergency_services.append(f)
+                elif ftype in ['marketplace', 'supermarket', 'convenience', 'bank', 'fuel',
+                              'restaurant', 'fast_food', 'cafe', 'mall', 'atm', 'department_store']:
+                    f['subcategory'] = 'essential'
+                    essential_services.append(f)
+                else:
+                    f['subcategory'] = 'other'
+                    other_facilities.append(f)
+        
+        nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
+        nearest_hospital = next((f for f in medical if f.get('facility_type') in ['hospital', 'clinic']), None)
+        nearest_fire = next((f for f in emergency_services if f.get('facility_type') == 'fire_station'), None)
+        
+        def build_facility_summary(facility):
+            if not facility:
+                return None
+            return {
+                'name': facility.get('name', 'Unknown'),
+                'distance': facility.get('distance_display', 'N/A'),
+                'distance_meters': facility.get('distance_meters', 999999),
+                'duration': facility.get('duration_display', 'N/A'),
+                'is_walkable': facility.get('is_walkable', False),
+            }
+        
+        return {
+            'summary': {
+                'nearest_evacuation': build_facility_summary(nearest_evacuation),
+                'nearest_hospital': build_facility_summary(nearest_hospital),
+                'nearest_fire_station': build_facility_summary(nearest_fire),
+            },
+            'counts': {
+                'evacuation': len(evacuation_centers),
+                'medical': len(medical),
+                'emergency_services': len(emergency_services),
+                'essential': len(essential_services),
+                'other': len(other_facilities),
+                'total': len(facilities)
+            }
+        }
+    except Exception as e:
+        print(f"❌ ERROR in get_nearby_facilities_for_suitability: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        return {
+            'summary': {
+                'nearest_evacuation': None,
+                'nearest_hospital': None,
+                'nearest_fire_station': None,
+            },
+            'counts': {
+                'evacuation': 0,
+                'medical': 0,
+                'emergency_services': 0,
+                'essential': 0,
+                'other': 0,
+                'total': 0
+            }
+        }
 
 def get_user_friendly_label(level, hazard_type):
     """Convert technical labels to citizen-friendly descriptions"""
@@ -505,7 +694,6 @@ def generate_debris_flow_critical_warning():
         '''
     }
 
-
 def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
     """
     Calculate infrastructure development suitability score (0-100)
@@ -514,20 +702,11 @@ def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
     
     Factors considered:
     1. Disaster Safety (60% weight) - PRIMARY CONSIDERATION
-       Lower disaster risk = higher suitability
     2. Access to Critical Facilities (20% weight) - SECONDARY
-       Proximity to hospitals, evacuation centers
     3. Community Infrastructure (20% weight) - SECONDARY
-       Access to essential services
-    
-    This ensures high-risk areas ALWAYS have low suitability scores.
-    
-    Returns:
-        dict: Suitability assessment with score, category, and recommendations
     """
     
-    # 1. DISASTER SAFETY COMPONENT (60% weight) - INCREASED FROM 40%
-    # This is now the DOMINANT factor
+    # 1. DISASTER SAFETY COMPONENT (60% weight)
     hazard_score = hazard_data['overall_risk']['score']
     
     # Special case: Debris Flow = 0 suitability
@@ -547,10 +726,10 @@ def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
             }
         }
     
-    # Calculate safety score (inverse of hazard) with INCREASED weight
-    safety_score = (100 - hazard_score) * 0.6  # CHANGED from 0.4 to 0.6
+    # Calculate safety score (inverse of hazard)
+    safety_score = (100 - hazard_score) * 0.6
     
-    # Generate safety description based on risk level
+    # Generate safety description
     if hazard_score >= 75:
         safety_desc = 'Very high disaster risk - extensive mitigation required'
     elif hazard_score >= 50:
@@ -560,56 +739,42 @@ def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
     else:
         safety_desc = 'Low disaster risk - safe for development'
     
-    # 2. ACCESSIBILITY COMPONENT (20% weight) - DECREASED FROM 30%
+    # 2. ACCESSIBILITY COMPONENT (20% weight)
     accessibility_score = 0
     
-    # Check nearest evacuation center
+    # Check nearest evacuation center - USE distance_meters directly
     if nearby_facilities.get('summary', {}).get('nearest_evacuation'):
         evac_data = nearby_facilities['summary']['nearest_evacuation']
-        evac_dist_str = evac_data.get('distance', '999 km')
-        
-        # Parse distance
-        if 'km' in evac_dist_str:
-            evac_distance_km = float(evac_dist_str.split('km')[0].strip())
-        elif 'm' in evac_dist_str:
-            evac_distance_km = float(evac_dist_str.split('m')[0].strip()) / 1000
-        else:
-            evac_distance_km = 10
+        evac_distance_m = evac_data.get('distance_meters', 999999)
+        evac_distance_km = evac_distance_m / 1000
         
         # Scoring: 100 if within 500m, decreasing to 0 at 5km
         evac_score = max(0, min(100, 100 - ((evac_distance_km - 0.5) / 4.5) * 100))
         accessibility_score += evac_score * 0.5
     
-    # Check nearest hospital/medical facility
+    # Check nearest hospital - USE distance_meters directly
     if nearby_facilities.get('summary', {}).get('nearest_hospital'):
         hosp_data = nearby_facilities['summary']['nearest_hospital']
-        hosp_dist_str = hosp_data.get('distance', '999 km')
-        
-        # Parse distance
-        if 'km' in hosp_dist_str:
-            hosp_distance_km = float(hosp_dist_str.split('km')[0].strip())
-        elif 'm' in hosp_dist_str:
-            hosp_distance_km = float(hosp_dist_str.split('m')[0].strip()) / 1000
-        else:
-            hosp_distance_km = 15
+        hosp_distance_m = hosp_data.get('distance_meters', 999999)
+        hosp_distance_km = hosp_distance_m / 1000
         
         # Scoring: 100 if within 1km, decreasing to 0 at 10km
         hosp_score = max(0, min(100, 100 - ((hosp_distance_km - 1) / 9) * 100))
         accessibility_score += hosp_score * 0.5
     
-    accessibility_component = accessibility_score * 0.2  # CHANGED from 0.3 to 0.2
+    accessibility_component = accessibility_score * 0.2
     
-    # Generate accessibility description with more detail
+    # Generate accessibility description
     if accessibility_score >= 75:
-        access_desc = 'Excellent access - hospitals and evacuation centers are within walking distance or very close by for emergency response'
+        access_desc = 'Excellent access - hospitals and evacuation centers within walking distance or very close by for emergency response'
     elif accessibility_score >= 50:
-        access_desc = 'Good access - hospitals and evacuation centers are reachable within 10-15 minutes by vehicle during emergencies'
+        access_desc = 'Good access - hospitals and evacuation centers reachable within 10-15 minutes by vehicle'
     elif accessibility_score >= 25:
-        access_desc = 'Moderate access - hospitals and evacuation centers are 15-30 minutes away, may require vehicle for emergency evacuation'
+        access_desc = 'Moderate access - hospitals and evacuation centers 15-30 minutes away by vehicle'
     else:
-        access_desc = 'Poor access - hospitals and evacuation centers are far (30+ minutes away), making emergency response difficult'
+        access_desc = 'Poor access - hospitals and evacuation centers far away (30+ minutes), emergency response difficult'
     
-    # 3. COMMUNITY INFRASTRUCTURE COMPONENT (20% weight) - DECREASED FROM 30%
+    # 3. COMMUNITY INFRASTRUCTURE COMPONENT (20% weight)
     infrastructure_score = 0
     
     # Count facilities in each category
@@ -639,46 +804,44 @@ def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
     elif essential_count >= 2:
         infrastructure_score += 15
     
-    infrastructure_component = min(100, infrastructure_score) * 0.2  # CHANGED from 0.3 to 0.2
+    infrastructure_component = min(100, infrastructure_score) * 0.2
     
-    # Generate infrastructure description with specific facility details
+    # Generate infrastructure description
     total_facilities = nearby_facilities.get('counts', {}).get('total', 0)
     
     if total_facilities >= 15:
-        infra_desc = f'Well-developed area with {medical_count} medical facilities, {evac_count} evacuation centers, and {essential_count} essential services (markets, banks, gas stations) nearby'
+        infra_desc = f'Well-developed area with {medical_count} medical facilities, {evac_count} evacuation centers, and {essential_count} essential services nearby'
     elif total_facilities >= 8:
-        infra_desc = f'Adequate development with {medical_count} medical facilities, {evac_count} evacuation centers, and {essential_count} essential services within 3km radius'
+        infra_desc = f'Adequate development with {medical_count} medical facilities, {evac_count} evacuation centers, and {essential_count} essential services within 3km'
     elif total_facilities >= 3:
-        infra_desc = f'Basic development - only {total_facilities} facilities nearby including {medical_count} medical facilities and {evac_count} evacuation centers'
+        infra_desc = f'Basic development - {total_facilities} facilities nearby including {medical_count} medical and {evac_count} evacuation centers'
     else:
-        infra_desc = f'Underdeveloped area - very limited facilities ({total_facilities} total) within 3km. May lack essential services like markets, clinics, or evacuation centers'
+        infra_desc = f'Underdeveloped area - very limited facilities ({total_facilities} total) within 3km'
     
     # TOTAL SUITABILITY SCORE
     total_suitability = safety_score + accessibility_component + infrastructure_component
     
-    # NEW: Apply additional penalty for very high risk areas
-    # This ensures contradictions don't happen
+    # Apply additional penalty for very high risk areas
     if hazard_score >= 75:
-        # Areas with very high disaster risk get additional 20% penalty
         total_suitability = total_suitability * 0.8
     
-    # Categorize suitability with STRICTER thresholds
-    if total_suitability >= 70:  # Raised from 75
+    # Categorize suitability
+    if total_suitability >= 70:
         category = 'HIGHLY SUITABLE'
         color = '#10b981'
         recommendation = 'Excellent location for development. Low disaster risk with good infrastructure and accessibility.'
-    elif total_suitability >= 50:  # Kept at 50
+    elif total_suitability >= 50:
         category = 'MODERATELY SUITABLE'
         color = '#f59e0b'
         recommendation = 'Acceptable for development with proper planning and standard precautions. Some disaster risk present.'
-    elif total_suitability >= 30:  # Raised from 25
+    elif total_suitability >= 30:
         category = 'MARGINALLY SUITABLE'
         color = '#f97316'
-        recommendation = 'Development possible but challenging. High disaster risk requires extensive mitigation measures and careful planning.'
+        recommendation = 'Development possible but challenging. High disaster risk requires extensive mitigation.'
     else:
         category = 'NOT SUITABLE'
         color = '#ef4444'
-        recommendation = 'Not recommended for development. Very high disaster risk and/or inadequate infrastructure. Seek alternative sites.'
+        recommendation = 'Not recommended for development. Very high disaster risk and/or inadequate infrastructure.'
     
     return {
         'score': round(total_suitability, 1),
@@ -694,6 +857,7 @@ def calculate_suitability_score(lat, lng, hazard_data, nearby_facilities):
             'infrastructure_description': infra_desc
         }
     }
+
 
 def generate_smart_recommendations(flood_level, landslide_level, liquefaction_level):
     """
@@ -973,115 +1137,6 @@ def get_datasets(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
     
-@api_view(['GET'])
-def get_nearby_facilities(request):
-    """Get facilities within specified radius with disaster-priority grouping"""
-    try:
-        lat = float(request.GET.get('lat'))
-        lng = float(request.GET.get('lng'))
-        radius = int(request.GET.get('radius', 3000))
-        
-        facilities = OverpassClient.query_facilities(lat, lng, radius)
-        
-        # Calculate distances
-        for facility in facilities:
-            distance = calculate_distance(lat, lng, facility['lat'], facility['lng'])
-            facility['distance_meters'] = distance
-            facility['distance_km'] = round(distance / 1000, 2)
-            facility['distance_display'] = format_distance(distance)
-            
-            # Add walkability flag (critical for disasters)
-            facility['is_walkable'] = distance <= 500  # Within 500m
-        
-        facilities.sort(key=lambda x: x['distance_meters'])
-        
-        # Reorganize by disaster priority
-        evacuation_centers = []
-        medical = []
-        emergency_services = []
-        essential_services = []
-        other_facilities = []
-        
-        for f in facilities:
-            ftype = f['facility_type']
-            
-            # Priority 1: Evacuation (schools, gyms, community centers as shelters)
-            if ftype in ['school', 'community_centre', 'kindergarten', 'college', 'university']:
-                f['subcategory'] = 'evacuation'
-                f['priority'] = 1
-                evacuation_centers.append(f)
-            
-            # Priority 2: Medical
-            elif ftype in ['hospital', 'clinic', 'doctors', 'pharmacy']:
-                f['subcategory'] = 'medical'
-                f['priority'] = 2
-                medical.append(f)
-            
-            # Priority 3: Emergency Services
-            elif ftype in ['fire_station', 'police']:
-                f['subcategory'] = 'emergency_services'
-                f['priority'] = 3
-                emergency_services.append(f)
-            
-            # Priority 4: Essential Services (food, water)
-            elif ftype in ['marketplace', 'supermarket', 'convenience']:
-                f['subcategory'] = 'essential'
-                f['priority'] = 4
-                essential_services.append(f)
-            
-            # Priority 5: Everything else
-            else:
-                f['subcategory'] = 'other'
-                f['priority'] = 5
-                other_facilities.append(f)
-        
-        # Find nearest of each critical type
-        nearest_evacuation = evacuation_centers[0] if evacuation_centers else None
-        nearest_hospital = next((f for f in medical if f['facility_type'] in ['hospital', 'clinic']), None)
-        nearest_fire = next((f for f in emergency_services if f['facility_type'] == 'fire_station'), None)
-        
-        result = {
-            'summary': {
-                'nearest_evacuation': {
-                    'name': nearest_evacuation['name'] if nearest_evacuation else 'None within 3km',
-                    'distance': nearest_evacuation['distance_display'] if nearest_evacuation else 'N/A',
-                    'is_walkable': nearest_evacuation['is_walkable'] if nearest_evacuation else False,
-                } if nearest_evacuation else None,
-                'nearest_hospital': {
-                    'name': nearest_hospital['name'] if nearest_hospital else 'None within 3km',
-                    'distance': nearest_hospital['distance_display'] if nearest_hospital else 'N/A',
-                    'is_walkable': nearest_hospital['is_walkable'] if nearest_hospital else False,
-                } if nearest_hospital else None,
-                'nearest_fire_station': {
-                    'name': nearest_fire['name'] if nearest_fire else 'None within 3km',
-                    'distance': nearest_fire['distance_display'] if nearest_fire else 'N/A',
-                    'is_walkable': nearest_fire['is_walkable'] if nearest_fire else False,
-                } if nearest_fire else None,
-            },
-            'evacuation_centers': evacuation_centers[:10],
-            'medical': medical[:10],
-            'emergency_services': emergency_services[:10],
-            'essential_services': essential_services[:10],
-            'other': other_facilities[:10],
-            'counts': {
-                'evacuation': len(evacuation_centers),
-                'medical': len(medical),
-                'emergency_services': len(emergency_services),
-                'essential': len(essential_services),
-                'other': len(other_facilities),
-                'total': len(facilities)
-            }
-        }
-        
-        return Response(result)
-        
-    except ValueError:
-        return Response({'error': 'Invalid coordinates or radius'}, status=400)
-    except Exception as e:
-        print(f"Error in get_nearby_facilities: {e}")
-        return Response({'error': str(e)}, status=500)
-
-
 def calculate_distance(lat1, lon1, lat2, lon2):
     """
     Calculate distance between two points using Haversine formula
@@ -1128,23 +1183,23 @@ def get_location_info(request):
 
 @api_view(['GET'])
 def get_barangay_data(request):
-    """Get barangay boundary data as GeoJSON"""
-    from .models import BarangayBoundary
-    
+    """Get barangay boundary data as GeoJSON - NEW VERSION"""
     try:
         barangay_features = []
-        barangay_records = BarangayBoundary.objects.all()
+        
+        # Use the NEW barangay model
+        barangay_records = BarangayBoundaryNew.objects.all()
         
         for record in barangay_records:
             feature = {
                 'type': 'Feature',
                 'properties': {
-                    'brgy_id': record.brgy_id,
-                    'barangay_name': record.b_name,
-                    'municipality': record.lgu_name,
-                    'population_2020': record.pop_2020,
-                    'area_hectares': record.hectares,
-                    'district': record.district,
+                    'barangay_name': record.adm4_en,
+                    'barangay_code': record.adm4_pcode,
+                    'municipality': record.adm3_en,
+                    'province': record.adm2_en,
+                    'region': record.adm1_en,
+                    'area_sqkm': record.area_sqkm,
                     'dataset_id': record.dataset.id
                 },
                 'geometry': json.loads(record.geometry.geojson)
@@ -1161,15 +1216,14 @@ def get_barangay_data(request):
     except Exception as e:
         return Response({'error': str(e)}, status=500)
 
+
+# REPLACE the old get_barangay_from_point function
 @api_view(['GET'])
 def get_barangay_from_point(request):
     """
-    Get barangay information for a specific point location
-    This replaces Nominatim for accurate barangay identification
+    Get barangay information for a specific point location - NEW VERSION
+    Uses accurate PSA-NAMRIA boundaries
     """
-    from .models import BarangayBoundary
-    from django.contrib.gis.geos import Point
-    
     try:
         lat = float(request.GET.get('lat'))
         lng = float(request.GET.get('lng'))
@@ -1177,27 +1231,21 @@ def get_barangay_from_point(request):
         point = Point(lng, lat, srid=4326)
         
         # Find which barangay boundary contains this point
-        barangay = BarangayBoundary.objects.filter(
+        barangay = BarangayBoundaryNew.objects.filter(
             geometry__contains=point
         ).first()
         
         if barangay:
-            # Calculate population density
-            population_density = None
-            if barangay.pop_2020 and barangay.hectares and barangay.hectares > 0:
-                population_density = round(barangay.pop_2020 / barangay.hectares, 2)
-            
             return Response({
                 'success': True,
-                'barangay': barangay.b_name,
-                'municipality': barangay.lgu_name,
-                'province': 'Negros Oriental',
-                'population_2020': barangay.pop_2020,
-                'area_hectares': barangay.hectares,
-                'district': barangay.district,
-                'brgy_code': barangay.brgycode,
-                'population_density': population_density,  # NEW: Population per hectare
-                'full_address': f"{barangay.b_name}, {barangay.lgu_name}, Negros Oriental"
+                'barangay': barangay.adm4_en,
+                'municipality': barangay.adm3_en,
+                'province': barangay.adm2_en,
+                'region': barangay.adm1_en,
+                'area_sqkm': barangay.area_sqkm,
+                'barangay_code': barangay.adm4_pcode,
+                'municipality_code': barangay.adm3_pcode,
+                'full_address': f"{barangay.adm4_en}, {barangay.adm3_en}, {barangay.adm2_en}"
             })
         else:
             # Point is outside all barangay boundaries

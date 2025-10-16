@@ -184,24 +184,9 @@ async function showLocationInfo(lat, lng) {
         const locationData = await response.json();
         
         if (response.ok && locationData.success) {
-            // Format population with commas
-            const population = locationData.population_2020 
-                ? locationData.population_2020.toLocaleString() 
-                : 'N/A';
-            
-            // Format area
-            const area = locationData.area_hectares 
-                ? locationData.area_hectares.toFixed(2) 
-                : 'N/A';
-            
-            // Format district
-            const district = locationData.district 
-                ? locationData.district 
-                : 'N/A';
-            
-            // Format population density
-            const density = locationData.population_density 
-                ? `${locationData.population_density.toLocaleString()} people/hectare` 
+            // Format area with 2 decimal places
+            const area = locationData.area_sqkm 
+                ? locationData.area_sqkm.toFixed(2) 
                 : 'N/A';
             
             locationInfo.innerHTML = `
@@ -211,30 +196,27 @@ async function showLocationInfo(lat, lng) {
                         <div class="location-barangay">${locationData.barangay}</div>
                         <div class="location-municipality">${locationData.municipality}, ${locationData.province}</div>
                         
-                        <!-- NEW: Barangay Statistics Section -->
+                        <!-- NEW: Simplified Stats Section (No population) -->
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
-                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.8rem; color: #6b7280;">
-                                <div>
-                                    <span style="font-weight: 600; color: #4b5563;">Population (2020):</span><br>
-                                    <span style="color: #1f2937;">${population}</span>
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem;">
+                                <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
+                                    <div style="font-weight: 600; color: #4b5563; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">Area</div>
+                                    <div style="color: #1f2937; font-weight: 700; font-size: 1rem;">${area} km²</div>
                                 </div>
-                                <div>
-                                    <span style="font-weight: 600; color: #4b5563;">Area:</span><br>
-                                    <span style="color: #1f2937;">${area} ha</span>
-                                </div>
-                                <div>
-                                    <span style="font-weight: 600; color: #4b5563;">District:</span><br>
-                                    <span style="color: #1f2937;">${district}</span>
-                                </div>
-                                <div>
-                                    <span style="font-weight: 600; color: #4b5563;">Density:</span><br>
-                                    <span style="color: #1f2937;">${density}</span>
+                                <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
+                                    <div style="font-weight: 600; color: #4b5563; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">Region</div>
+                                    <div style="color: #1f2937; font-weight: 700; font-size: 0.8rem;">${locationData.region || 'Central Visayas'}</div>
                                 </div>
                             </div>
                         </div>
                         
                         <div class="location-coordinates" style="margin-top: 0.75rem;">
                             <span>${lat.toFixed(6)}°N, ${lng.toFixed(6)}°E</span>
+                        </div>
+                        
+                        <!-- NEW: Data source attribution -->
+                        <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; font-size: 0.7rem; color: #9ca3af; text-align: center;">
+                            📊 Boundary data: PSA-NAMRIA via HumData
                         </div>
                     </div>
                 </div>
@@ -830,12 +812,21 @@ async function performSearch() {
 
 async function loadNearbyFacilities(lat, lng) {
     const container = document.getElementById('facilities-section');
+    
+    // Show loading with estimated time
     container.innerHTML = `
         <div style="text-align: center; padding: 2rem;">
             <div class="loading-spinner"></div>
-            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">Loading nearby facilities...</p>
+            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 0.5rem;">
+                Finding nearby facilities...
+            </p>
+            <p style="color: #9ca3af; font-size: 0.75rem; margin-top: 0.25rem;">
+                ⚡ First load may take ~5 seconds. Subsequent loads are instant (cached).
+            </p>
         </div>
     `;
+    
+    const startTime = Date.now();
     
     try {
         const response = await fetch(`/api/nearby-facilities/?lat=${lat}&lng=${lng}&radius=3000`);
@@ -845,6 +836,10 @@ async function loadNearbyFacilities(lat, lng) {
         }
         
         const data = await response.json();
+        const loadTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        
+        console.log(`✅ Facilities loaded in ${loadTime} seconds`);
+        
         displayFacilities(data);
         
     } catch (error) {
@@ -874,7 +869,7 @@ function displayFacilities(data) {
     }
     
     let html = `
-        <!-- EMERGENCY READINESS SUMMARY - Enhanced Design -->
+        <!-- EMERGENCY PREPAREDNESS SUMMARY - FIXED VERSION -->
         <div class="emergency-summary" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%); border: 2px solid #3b82f6; border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.15);">
             <h5 style="margin: 0 0 1rem 0; color: #1e40af; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
                 <span style="font-size: 1.5rem;">🚨</span>
@@ -882,18 +877,20 @@ function displayFacilities(data) {
             </h5>
     `;
     
-    // Nearest Evacuation
+    // FIXED: Nearest Evacuation Center
     if (data.summary.nearest_evacuation) {
         const evac = data.summary.nearest_evacuation;
         const walkIcon = evac.is_walkable ? '✅' : '⚠️';
         const walkStatus = evac.is_walkable ? 'Walking distance' : 'Requires transport';
+        const travelTime = evac.duration ? `🚗 ${evac.duration} drive` : '';
+        
         html += `
             <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981;">
                 <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Evacuation Center</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${evac.name}</div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
                     <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${evac.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280; font-style: italic;">${walkStatus}</span>
+                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
                 </div>
             </div>
         `;
@@ -906,18 +903,45 @@ function displayFacilities(data) {
         `;
     }
     
-    // Nearest Hospital
+    // FIXED: Nearest Hospital/Medical Facility (NO DUPLICATES)
     if (data.summary.nearest_hospital) {
         const hosp = data.summary.nearest_hospital;
         const walkIcon = hosp.is_walkable ? '✅' : '⚠️';
         const walkStatus = hosp.is_walkable ? 'Walking distance' : 'Requires transport';
+        const travelTime = hosp.duration ? `🚗 ${hosp.duration} drive` : '';
+        
         html += `
             <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #ef4444;">
                 <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Medical Facility</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${hosp.name}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${hosp.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280; font-style: italic;">${walkStatus}</span>
+                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
+                </div>
+            </div>
+        `;
+    } else {
+        html += `
+            <div style="padding: 0.875rem; background: #fee2e2; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #ef4444;">
+                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No medical facility within 3km</div>
+            </div>
+        `;
+    }
+    
+    // FIXED: Nearest Fire Station
+    if (data.summary.nearest_fire_station) {
+        const fire = data.summary.nearest_fire_station;
+        const walkIcon = fire.is_walkable ? '✅' : '⚠️';
+        const walkStatus = fire.is_walkable ? 'Walking distance' : 'Requires transport';
+        const travelTime = fire.duration ? `🚗 ${fire.duration} drive` : '';
+        
+        html += `
+            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316;">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Fire Station</div>
+                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${fire.name}</div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${fire.distance} away</span>
+                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
                 </div>
             </div>
         `;
@@ -1010,6 +1034,10 @@ function displayFacilities(data) {
 function createFacilityCard(facility, borderColor, bgColor, facilityId) {
     const walkBadge = facility.is_walkable 
         ? '<span style="background: #10b981; color: white; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">WALKABLE</span>'
+        : '';
+    // NEW: Add travel time display
+    const travelTime = facility.duration_display 
+        ? `<span style="font-size: 0.75rem; color: #6b7280;">🚗 ${facility.duration_display} drive</span>` 
         : '';
     
     return `

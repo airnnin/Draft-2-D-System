@@ -136,17 +136,28 @@
                             <label for="dataset-type">Dataset Type:</label>
                             <select id="dataset-type" name="dataset_type" required>
                                 <option value="">Select dataset type...</option>
-                                <option value="flood">Flood Susceptibility</option>
-                                <option value="landslide">Landslide Susceptibility</option>
-                                <option value="liquefaction">Liquefaction Susceptibility</option>
-                                <option value="barangay">Barangay Boundaries</option>
+                                <option value="flood">Flood Susceptibility (Shapefile)</option>
+                                <option value="landslide">Landslide Susceptibility (Shapefile)</option>
+                                <option value="liquefaction">Liquefaction Susceptibility (Shapefile)</option>
+                                <option value="barangay_new">Barangay Boundaries - PSA-NAMRIA</option>
                             </select>
                         </div>
                         
                         <div class="form-group">
-                            <label for="shapefile-input">Shapefile (ZIP format):</label>
+                            <small>
+                                <strong>For Barangay Boundaries (PSA-NAMRIA):</strong><br>
+                                • Upload the <code>phl_adm_psa_namria_20231106_gdb.gdb.zip</code> file<br>
+                                • System will automatically extract and filter for Negros Oriental only<br>
+                                • Source: <a href="https://data.humdata.org/dataset/cod-ab-phl" target="_blank" style="color: #3b82f6;">HumData COD-AB Philippines</a>
+                                <br><br>
+                                <strong>For Hazard Layers:</strong><br>
+                                • Upload a ZIP file containing .shp, .shx, .dbf, and .prj files
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="shapefile-input">Select File (ZIP format):</label>
                             <input type="file" id="shapefile-input" name="shapefile" accept=".zip" required>
-                            <small>Upload a ZIP file containing .shp, .shx, .dbf, and .prj files</small>
                         </div>
                         
                         <div class="form-actions">

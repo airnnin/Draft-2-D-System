@@ -32,7 +32,7 @@ INSTALLED_APPS = [
     'django.contrib.gis',  # GeoDjango
     'rest_framework',
     'corsheaders',
-    'hazard_maps',
+    'hazard_maps.apps.HazardMapsConfig',
 ]
 
 MIDDLEWARE = [
@@ -105,4 +105,16 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.AllowAny',
     ]
+}
+
+# Caching Configuration
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'osrm_cache_table',
+        'TIMEOUT': 60 * 60 * 24 * 7,  # 7 days
+        'OPTIONS': {
+            'MAX_ENTRIES': 10000  # Store up to 10k cached locations
+        }
+    }
 }

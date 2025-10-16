@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.gis.admin import GISModelAdmin
-from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility, BarangayBoundary
+from .models import HazardDataset, FloodSusceptibility, LandslideSusceptibility, LiquefactionSusceptibility, BarangayBoundaryNew
 
 @admin.register(HazardDataset)
 class HazardDatasetAdmin(admin.ModelAdmin):
@@ -34,8 +34,24 @@ class FacilityAdmin(GISModelAdmin):
     list_filter = ['category', 'facility_type']
     search_fields = ['name']
 
-@admin.register(BarangayBoundary)
-class BarangayBoundaryAdmin(GISModelAdmin):
-    list_display = ['b_name', 'lgu_name', 'pop_2020', 'hectares', 'dataset']
-    list_filter = ['lgu_name', 'district', 'dataset']
-    search_fields = ['b_name', 'lgu_name', 'brgycode']
+
+@admin.register(BarangayBoundaryNew)
+class BarangayBoundaryNewAdmin(GISModelAdmin):
+    list_display = ['adm4_en', 'adm3_en', 'adm2_en', 'area_sqkm', 'dataset']
+    list_filter = ['adm3_en', 'adm2_en', 'dataset']
+    search_fields = ['adm4_en', 'adm3_en', 'adm4_pcode']
+    
+    fieldsets = (
+        ('Barangay Information', {
+            'fields': ('adm4_en', 'adm4_pcode', 'area_sqkm')
+        }),
+        ('Administrative Hierarchy', {
+            'fields': ('adm3_en', 'adm3_pcode', 'adm2_en', 'adm2_pcode', 'adm1_en', 'adm1_pcode')
+        }),
+        ('Metadata', {
+            'fields': ('dataset', 'date', 'valid_on', 'valid_to', 'objectid')
+        }),
+        ('Geometry', {
+            'fields': ('geometry', 'shape_length', 'shape_area')
+        }),
+    )

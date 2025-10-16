@@ -104,37 +104,60 @@ class Facility(models.Model):
     def __str__(self):
         return f"{self.name} ({self.facility_type})"
 
-class BarangayBoundary(models.Model):
-    """Model for barangay boundary data"""
+
+class BarangayBoundaryNew(models.Model):
+    """
+    NEW: Barangay boundaries from PSA-NAMRIA (HumData)
+    Source: https://data.humdata.org/dataset/cod-ab-phl
+    Coverage: Entire Philippines (filtered for Negros Oriental)
+    """
     dataset = models.ForeignKey(HazardDataset, on_delete=models.CASCADE)
     
-    # Basic identifiers
-    brgy_id = models.BigIntegerField()
-    brgycode = models.CharField(max_length=20)
-    b_name = models.CharField(max_length=100)  # Barangay name
-    lgu_name = models.CharField(max_length=100)  # Municipality/City name
+    # Administrative hierarchy (from dataset fields)
+    objectid = models.IntegerField(null=True, blank=True)
+    
+    # Barangay (ADM4)
+    adm4_en = models.CharField(max_length=100)  # Barangay name (e.g., "Daro")
+    adm4_pcode = models.CharField(max_length=50)  # Barangay code (e.g., "PH0102801001")
+    
+    # Municipality/City (ADM3)
+    adm3_en = models.CharField(max_length=100)  # Municipality name (e.g., "Dumaguete City")
+    adm3_pcode = models.CharField(max_length=50)  # Municipality code
+    
+    # Province (ADM2)
+    adm2_en = models.CharField(max_length=100)  # Province name (e.g., "Negros Oriental")
+    adm2_pcode = models.CharField(max_length=50)  # Province code
+    
+    # Region (ADM1)
+    adm1_en = models.CharField(max_length=100)  # Region name (e.g., "Region VII")
+    adm1_pcode = models.CharField(max_length=50)  # Region code
+    
+    # Country (ADM0)
+    adm0_en = models.CharField(max_length=100, default="Philippines")
+    adm0_pcode = models.CharField(max_length=10, default="PH")
+    
+    # Metadata
+    date = models.DateField(null=True, blank=True)
+    valid_on = models.DateField(null=True, blank=True)
+    valid_to = models.DateField(null=True, blank=True)
     
     # Area measurements
-    area_has = models.FloatField(null=True, blank=True)  # Area in hectares
-    area = models.FloatField(null=True, blank=True)
-    perimeter = models.FloatField(null=True, blank=True)
-    hectares = models.FloatField(null=True, blank=True)
-    area_nso = models.FloatField(null=True, blank=True)
-    
-    # Additional data
-    district = models.IntegerField(null=True, blank=True)
-    pop_2020 = models.IntegerField(null=True, blank=True)  # Population 2020
-    nsodata = models.CharField(max_length=100, null=True, blank=True)
+    shape_length = models.FloatField(null=True, blank=True)
+    shape_area = models.FloatField(null=True, blank=True)
+    area_sqkm = models.FloatField(null=True, blank=True)  # IMPORTANT: Area in square kilometers
     
     # Geometry
     geometry = models.MultiPolygonField(srid=4326)
     
     class Meta:
         indexes = [
-            models.Index(fields=['brgy_id']),
-            models.Index(fields=['b_name']),
-            models.Index(fields=['lgu_name']),
+            models.Index(fields=['adm4_en']),  # Barangay name
+            models.Index(fields=['adm3_en']),  # Municipality
+            models.Index(fields=['adm2_en']),  # Province
+            models.Index(fields=['adm4_pcode']),  # Barangay code
         ]
+        verbose_name = "Barangay Boundary (PSA-NAMRIA)"
+        verbose_name_plural = "Barangay Boundaries (PSA-NAMRIA)"
     
     def __str__(self):
-        return f"{self.b_name}, {self.lgu_name}"
+        return f"{self.adm4_en}, {self.adm3_en}, {self.adm2_en}"
