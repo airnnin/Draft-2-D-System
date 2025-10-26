@@ -163,6 +163,7 @@ function onMapClick(e) {
     currentMarker = L.marker([lat, lng]).addTo(map);
     showLocationInfo(lat, lng);
 }
+
 async function showLocationInfo(lat, lng) {
     const sidebar = document.getElementById('sidebar');
     const sidebarToggle = document.getElementById('sidebar-toggle');
@@ -184,19 +185,77 @@ async function showLocationInfo(lat, lng) {
         const locationData = await response.json();
         
         if (response.ok && locationData.success) {
-            // Format area with 2 decimal places
             const area = locationData.area_sqkm 
                 ? locationData.area_sqkm.toFixed(2) 
                 : 'N/A';
             
-            locationInfo.innerHTML = `
+            // Build base location info
+            let locationHTML = `
                 <div class="location-header">
                     <div class="location-icon">📍</div>
                     <div class="location-details">
                         <div class="location-barangay">${locationData.barangay}</div>
                         <div class="location-municipality">${locationData.municipality}, ${locationData.province}</div>
+            `;
+            
+            // Load barangay characteristics if available
+            const barangayCode = locationData.barangay_code;
+            if (barangayCode) {
+                try {
+                    const charResponse = await fetch(`/api/barangay-characteristics/?code=${barangayCode}&lat=${lat}&lng=${lng}`);
+                    const charData = await charResponse.json();
+                    
+                    if (charData.found && charData.barangay) {
+                        const brgy = charData.barangay;
                         
-                        <!-- NEW: Simplified Stats Section (No population) -->
+                        // Add barangay characteristics - NO FACILITIES HERE
+                        locationHTML += `
+                            <!-- Barangay Characteristics Section -->
+                            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem; margin-bottom: 0.75rem;">
+                                    <!-- Population -->
+                                    <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
+                                        <div style="font-weight: 600; color: #4b5563; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">👥 Population</div>
+                                        <div style="color: #1f2937; font-weight: 700; font-size: 1rem;">${brgy.population_display}</div>
+                                    </div>
+                                    
+                                    <!-- Landscape -->
+                                    <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
+                                        <div style="font-weight: 600; color: #4b5563; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">🌍 Landscape</div>
+                                        <div style="color: #1f2937; font-weight: 700; font-size: 0.85rem;">${brgy.landscape_icon} ${brgy.ecological_landscape || 'N/A'}</div>
+                                    </div>
+                                </div>
+                                
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem;">
+                                    <!-- Urbanization -->
+                                    <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
+                                        <div style="font-weight: 600; color: #4b5563; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">🏘️ Type</div>
+                                        <div style="color: #1f2937; font-weight: 700; font-size: 0.85rem;">${brgy.urbanization_icon} ${brgy.urbanization || 'N/A'}</div>
+                                    </div>
+                                    
+                                    <!-- Cellular Signal -->
+                                    <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
+                                        <div style="font-weight: 600; color: #4b5563; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">📶 Signal</div>
+                                        <div style="color: #1f2937; font-weight: 700; font-size: 0.85rem;">${brgy.cellular_signal === 'Yes' ? '✅ Yes' : brgy.cellular_signal === 'No' ? '❌ No' : 'N/A'}</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Street Sweeper -->
+                                <div style="margin-top: 0.75rem; background: ${brgy.public_street_sweeper === 'Yes' ? '#d1fae5' : '#fee2e2'}; padding: 0.625rem; border-radius: 6px; text-align: center;">
+                                    <div style="font-weight: 600; color: #4b5563; font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.25rem;">🧹 Street Sweeper</div>
+                                    <div style="color: #1f2937; font-weight: 700; font-size: 0.95rem;">${brgy.public_street_sweeper === 'Yes' ? '✅ Available' : brgy.public_street_sweeper === 'No' ? '❌ Not Available' : 'N/A'}</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                } catch (charError) {
+                    console.log('No barangay characteristics data available');
+                }
+            }
+            
+            // Complete the location info HTML - NO FACILITIES
+            locationHTML += `
+                        <!-- Area and Region -->
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb;">
                             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; font-size: 0.85rem;">
                                 <div style="background: #f9fafb; padding: 0.625rem; border-radius: 6px;">
@@ -214,15 +273,21 @@ async function showLocationInfo(lat, lng) {
                             <span>${lat.toFixed(6)}°N, ${lng.toFixed(6)}°E</span>
                         </div>
                         
-                        <!-- NEW: Data source attribution -->
                         <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #e5e7eb; font-size: 0.7rem; color: #9ca3af; text-align: center;">
                             📊 Boundary data: PSA-NAMRIA via HumData
                         </div>
                     </div>
                 </div>
             `;
+            
+            locationInfo.innerHTML = locationHTML;
+            
+            // Load municipality summary on the right side
+            if (locationData.municipality_code) {
+                loadMunicipalitySummary(locationData.municipality_code);
+            }
         } else {
-            // Fallback if point is outside barangay boundaries
+            // Fallback
             locationInfo.innerHTML = `
                 <div class="location-header">
                     <div class="location-icon">📍</div>
@@ -255,11 +320,13 @@ async function showLocationInfo(lat, lng) {
 
     getHazardInfoForLocation(lat, lng, hazardDetails);
     
+    // Load facilities in the bottom section
     const facilitiesContainer = document.getElementById('facilities-section');
     if (facilitiesContainer) {
         loadNearbyFacilities(lat, lng);
     }
 }
+
 
 async function getHazardInfoForLocation(lat, lng, container) {
     container.innerHTML = `
@@ -275,7 +342,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
 
         if (response.ok) {
             const overall = data.overall_risk;
-            const suitability = data.suitability;  // NEW: Get suitability data
+            const suitability = data.suitability;
             
             let html = `
                 <!-- SUITABILITY SCORE CARD - NEW PRIMARY INDICATOR -->
@@ -302,6 +369,7 @@ async function getHazardInfoForLocation(lat, lng, container) {
                             ${suitability.recommendation}
                         </div>
                     </div>
+                
                     
                     <!-- Suitability Breakdown -->
                     <details style="cursor: pointer;">
@@ -360,8 +428,31 @@ async function getHazardInfoForLocation(lat, lng, container) {
                         </div>
                     </details>
                 </div>
-                
+            `;
             
+            // ==========================================
+            // 🆕 NEW: ADD ZONAL VALUES HERE
+            // ==========================================
+            try {
+                const barangayResponse = await fetch(`/api/barangay-from-point/?lat=${lat}&lng=${lng}`);
+                const barangayData = await barangayResponse.json();
+                
+                if (barangayData.success && barangayData.barangay_code) {
+                    const zonalResponse = await fetch(`/api/zonal-values/?code=${barangayData.barangay_code}`);
+                    const zonalData = await zonalResponse.json();
+                    
+                    if (zonalData.found) {
+                        html += buildZonalValuesCard(zonalData);
+                    }
+                }
+            } catch (zonalError) {
+                console.log('No zonal value data available:', zonalError);
+            }
+            // ==========================================
+            // END OF ZONAL VALUES SECTION
+            // ==========================================
+            
+            html += `
                 <!-- OVERALL RISK SCORE CARD - Enhanced Design -->
                 <div class="risk-score-card" style="background: linear-gradient(135deg, ${overall.color}15 0%, ${overall.color}25 100%); border: 2px solid ${overall.color}; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.07);">
                     <div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
@@ -493,6 +584,89 @@ async function getHazardInfoForLocation(lat, lng, container) {
         `;
         console.error('Error getting hazard info:', error);
     }
+}
+
+// 🆕 NEW FUNCTION: Build Zonal Values Card
+function buildZonalValuesCard(zonalData) {
+    const stats = zonalData.statistics;
+    const values = zonalData.zonal_values;
+    
+    let html = `
+        <!-- ZONAL VALUES CARD -->
+        <div class="zonal-values-card" style="background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%); border: 2px solid #f59e0b; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.07);">
+            <div style="text-align: center; margin-bottom: 1rem;">
+                <div style="font-size: 0.75rem; color: #92400e; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 0.5rem;">
+                    💰 Land Zonal Value
+                </div>
+                <div style="font-size: 2rem; font-weight: 800; color: #b45309; line-height: 1; margin-bottom: 0.25rem;">
+                    ${stats.average_price_display}
+                </div>
+                <div style="font-size: 0.85rem; color: #78350f; font-weight: 600;">Average Price per m²</div>
+            </div>
+            
+            <!-- Price Range -->
+            <div style="background: white; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+                    <div>
+                        <div style="font-size: 0.7rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.25rem;">Lowest</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #10b981;">${stats.min_price_display}</div>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 0.7rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.25rem;">Highest</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #ef4444;">${stats.max_price_display}</div>
+                    </div>
+                </div>
+                
+                <!-- Price Range Bar -->
+                <div style="width: 100%; height: 8px; background: linear-gradient(90deg, #10b981 0%, #f59e0b 50%, #ef4444 100%); border-radius: 4px;"></div>
+            </div>
+            
+            <!-- Zonal Value Details (Collapsible) -->
+            <details style="cursor: pointer;">
+                <summary style="font-size: 0.85rem; color: #78350f; font-weight: 600; padding: 0.75rem; background: white; border-radius: 6px; margin-bottom: 0.5rem;">
+                    📊 View ${stats.count} Zonal Value${stats.count > 1 ? 's' : ''} by Location
+                </summary>
+                <div style="background: white; padding: 0.75rem; border-radius: 6px; margin-top: 0.5rem; max-height: 300px; overflow-y: auto;">
+    `;
+    
+    // List each zonal value
+    values.forEach((value, index) => {
+        html += `
+            <div style="padding: 0.75rem; background: #fef3c7; border-radius: 6px; margin-bottom: 0.5rem; ${index === values.length - 1 ? 'margin-bottom: 0;' : ''}">
+                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 0.375rem;">
+                    <div style="flex: 1;">
+                        <div style="font-weight: 700; font-size: 0.875rem; color: #92400e; margin-bottom: 0.25rem;">
+                            ${value.street}
+                        </div>
+                        ${value.vicinity ? `<div style="font-size: 0.75rem; color: #78350f;">${value.vicinity}</div>` : ''}
+                    </div>
+                    <div style="text-align: right; margin-left: 0.5rem;">
+                        <div style="font-size: 0.95rem; font-weight: 800; color: #b45309;">
+                            ${value.price_formatted}
+                        </div>
+                    </div>
+                </div>
+                ${value.land_class && value.land_class !== 'N/A' ? `
+                    <div style="display: inline-block; background: #fbbf24; color: #78350f; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.7rem; font-weight: 600;">
+                        ${value.land_class}
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    });
+    
+    html += `
+                </div>
+            </details>
+            
+            <!-- Data Source -->
+            <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #fbbf24; font-size: 0.7rem; color: #92400e; text-align: center;">
+                📊 Zonal values from BIR/Local Assessor's Office
+            </div>
+        </div>
+    `;
+    
+    return html;
 }
 
 function createHazardCard(icon, title, description, color, severity, level) {
@@ -821,7 +995,7 @@ async function loadNearbyFacilities(lat, lng) {
                 Finding nearby facilities...
             </p>
             <p style="color: #9ca3af; font-size: 0.75rem; margin-top: 0.25rem;">
-                ⚡ First load may take ~5 seconds. Subsequent loads are instant (cached).
+                📍 Calculating distances to nearby facilities...
             </p>
         </div>
     `;
@@ -838,7 +1012,7 @@ async function loadNearbyFacilities(lat, lng) {
         const data = await response.json();
         const loadTime = ((Date.now() - startTime) / 1000).toFixed(1);
         
-        console.log(`✅ Facilities loaded in ${loadTime} seconds`);
+        console.log(`✅ ${data.counts.total} facilities loaded in ${loadTime} seconds (straight-line distance)`);
         
         displayFacilities(data);
         
@@ -868,55 +1042,55 @@ function displayFacilities(data) {
         return;
     }
     
+    // Calculate proper evacuation center counts
+    const governmentEvacCenters = data.evacuation_centers.filter(f => 
+        ['community_centre', 'townhall', 'public_building'].includes(f.facility_type)
+    );
+    const schoolEvacCenters = data.evacuation_centers.filter(f => 
+        ['school', 'kindergarten', 'college', 'university'].includes(f.facility_type)
+    );
+    const totalEvacCenters = governmentEvacCenters.length + schoolEvacCenters.length;
+
     let html = `
-        <!-- EMERGENCY PREPAREDNESS SUMMARY - FIXED VERSION -->
+        <!-- EMERGENCY PREPAREDNESS SUMMARY - ENHANCED WITH CLICKABLE ITEMS -->
         <div class="emergency-summary" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%); border: 2px solid #3b82f6; border-radius: 10px; padding: 1.25rem; margin-bottom: 1.5rem; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.15);">
             <h5 style="margin: 0 0 1rem 0; color: #1e40af; font-size: 1.05rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem;">
                 <span style="font-size: 1.5rem;">🚨</span>
                 <span>Emergency Preparedness</span>
             </h5>
     `;
-    
-    // FIXED: Nearest Evacuation Center
-    if (data.summary.nearest_evacuation) {
-        const evac = data.summary.nearest_evacuation;
-        const walkIcon = evac.is_walkable ? '✅' : '⚠️';
-        const walkStatus = evac.is_walkable ? 'Walking distance' : 'Requires transport';
-        const travelTime = evac.duration ? `🚗 ${evac.duration} drive` : '';
-        
-        html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Evacuation Center</div>
-                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${evac.name}</div>
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${evac.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
-                </div>
-            </div>
-        `;
-    } else {
-        html += `
-            <div style="padding: 0.875rem; background: #fee2e2; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #ef4444;">
-                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No evacuation center within 3km</div>
-                <div style="color: #7f1d1d; font-size: 0.75rem; margin-top: 0.25rem;">Consider identifying alternative safe areas</div>
-            </div>
-        `;
-    }
-    
-    // FIXED: Nearest Hospital/Medical Facility (NO DUPLICATES)
+
+    // 🔍 DEBUG: Log evacuation center counts
+    console.log('=== EVACUATION CENTER DEBUG ===');
+    console.log('Total evacuation_centers array:', data.evacuation_centers.length);
+    console.log('Government buildings:', governmentEvacCenters.length);
+    console.log('Schools:', schoolEvacCenters.length);
+    console.log('Facility types in evacuation_centers:', 
+        data.evacuation_centers.map(f => f.facility_type).join(', ')
+    );
+    console.log('================================');
+
+    // ✅ NEAREST HOSPITAL - CLICKABLE (RESTORED)
     if (data.summary.nearest_hospital) {
-        const hosp = data.summary.nearest_hospital;
-        const walkIcon = hosp.is_walkable ? '✅' : '⚠️';
-        const walkStatus = hosp.is_walkable ? 'Walking distance' : 'Requires transport';
-        const travelTime = hosp.duration ? `🚗 ${hosp.duration} drive` : '';
+        const hospital = data.summary.nearest_hospital;
+        const walkIcon = hospital.is_walkable ? '✅' : '⚠️';
         
         html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #ef4444;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Medical Facility</div>
-                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${hosp.name}</div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${hosp.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
+            <div class="facility-summary-card clickable-facility" 
+                data-lat="${data.medical[0].lat}" 
+                data-lng="${data.medical[0].lng}"
+                style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #dc2626; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#fef2f2'; this.style.transform='translateX(4px)';"
+                onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">
+                    🏥 Nearest Medical Facility
+                </div>
+                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">
+                    ${walkIcon} ${hospital.name}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${hospital.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
                 </div>
             </div>
         `;
@@ -927,26 +1101,87 @@ function displayFacilities(data) {
             </div>
         `;
     }
-    
-    // FIXED: Nearest Fire Station
+
+    // ✅ NEAREST EVACUATION CENTER - CLICKABLE
+    if (data.summary.nearest_evacuation) {
+        const evac = data.summary.nearest_evacuation;
+        const walkIcon = evac.is_walkable ? '✅' : '⚠️';
+        
+        // Determine facility type for clarification
+        const isSchool = ['school', 'kindergarten', 'college', 'university'].includes(data.evacuation_centers[0].facility_type);
+        const facilityTypeLabel = isSchool ? 'School (Evacuation Site)' : 'Evacuation Center';
+        
+        html += `
+            <div class="facility-summary-card clickable-facility" 
+                data-lat="${data.evacuation_centers[0].lat}" 
+                data-lng="${data.evacuation_centers[0].lng}"
+                style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #10b981; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#f0fdf4'; this.style.transform='translateX(4px)';"
+                onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">
+                    🏠 Nearest Evacuation Center
+                </div>
+                <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">
+                    ${walkIcon} ${evac.name}
+                </div>
+                <div style="font-size: 0.75rem; color: #6b7280; margin-bottom: 0.375rem;">
+                    ${facilityTypeLabel}
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${evac.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
+                </div>
+            </div>
+            
+            <!-- Evacuation Centers Breakdown -->
+            <div style="background: #f0fdf4; border-radius: 6px; padding: 0.75rem; margin-bottom: 0.75rem; border: 1px solid #86efac;">
+                <div style="font-size: 0.75rem; color: #166534; font-weight: 600; margin-bottom: 0.5rem;">
+                    📊 Total Evacuation Sites within 3km: ${totalEvacCenters}
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.75rem;">
+                    <div style="padding: 0.5rem; background: white; border-radius: 4px; text-align: center;">
+                        <div style="font-weight: 700; color: #10b981; font-size: 1rem;">${governmentEvacCenters.length}</div>
+                        <div style="color: #6b7280;">Gov't Buildings</div>
+                    </div>
+                    <div style="padding: 0.5rem; background: white; border-radius: 4px; text-align: center;">
+                        <div style="font-weight: 700; color: #7c3aed; font-size: 1rem;">${schoolEvacCenters.length}</div>
+                        <div style="color: #6b7280;">Schools</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        html += `
+            <div style="padding: 0.875rem; background: #fee2e2; border-radius: 6px; margin-bottom: 0.75rem; border-left: 4px solid #ef4444;">
+                <div style="color: #991b1b; font-size: 0.875rem; font-weight: 600;">⚠️ No evacuation center within 3km</div>
+            </div>
+        `;
+    }
+
+    // ✅ NEAREST EMERGENCY SERVICE (Fire/Police) - CLICKABLE
     if (data.summary.nearest_fire_station) {
         const fire = data.summary.nearest_fire_station;
         const walkIcon = fire.is_walkable ? '✅' : '⚠️';
-        const walkStatus = fire.is_walkable ? 'Walking distance' : 'Requires transport';
-        const travelTime = fire.duration ? `🚗 ${fire.duration} drive` : '';
+        
+        const emergencyService = data.emergency_services.find(f => f.facility_type === 'fire_station') || data.emergency_services[0];
         
         html += `
-            <div class="facility-summary-card" style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316;">
-                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">Nearest Fire Station</div>
+            <div class="facility-summary-card clickable-facility" 
+                data-lat="${emergencyService.lat}" 
+                data-lng="${emergencyService.lng}"
+                style="margin-bottom: 0.75rem; padding: 0.875rem; background: white; border-radius: 6px; border-left: 4px solid #f97316; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#fff7ed'; this.style.transform='translateX(4px)';"
+                onmouseout="this.style.backgroundColor='white'; this.style.transform='translateX(0)';">
+                <div style="font-size: 0.75rem; color: #6b7280; font-weight: 600; text-transform: uppercase; margin-bottom: 0.375rem; letter-spacing: 0.5px;">🚒 Nearest Emergency Service</div>
                 <div style="font-weight: 700; color: #1f2937; font-size: 0.95rem; margin-bottom: 0.25rem;">${walkIcon} ${fire.name}</div>
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">${fire.distance} away</span>
-                    <span style="font-size: 0.75rem; color: #6b7280;">${travelTime || walkStatus}</span>
+                    <span style="font-size: 0.875rem; color: #059669; font-weight: 600;">📍 ${fire.distance} away</span>
+                    <span style="font-size: 0.7rem; color: #3b82f6; font-style: italic;">Click to view on map</span>
                 </div>
             </div>
         `;
     }
-    
+
     html += `
             <div style="font-size: 0.75rem; color: #6b7280; margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #bfdbfe; text-align: center;">
                 ✅ Within 500m walking distance | ⚠️ Requires vehicle
@@ -954,81 +1189,327 @@ function displayFacilities(data) {
         </div>
     `;
     
-    // Detailed Facility Lists (Collapsible with better styling)
-    if (data.evacuation_centers.length > 0) {
-        html += `
-            <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: #fee2e2; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #fecaca;">
-                    <span>🏠 Evacuation Centers (${data.counts.evacuation})</span>
-                    <span style="font-size: 0.875rem;">▼</span>
-                </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
-        `;
-        data.evacuation_centers.forEach((f, index) => {
-            html += createFacilityCard(f, '#dc2626', '#fef2f2', `evac-${index}`);
+    // ========================================
+    // DETAILED FACILITY CATEGORIES - REORGANIZED
+    // ========================================
+    
+    // 1. MEDICAL FACILITIES (Hospitals & Clinics ONLY - Pharmacies moved to Essential Services)
+if (data.medical.length > 0) {
+    html += `
+        <details class="facility-details" style="margin-bottom: 0.75rem;" open>
+            <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #dc2626;">
+                <span>🏥 Medical Facilities (${data.counts.medical})</span>
+                <span style="font-size: 0.875rem;">▼</span>
+            </summary>
+            <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fef2f2; border-radius: 6px;">
+    `;
+    
+    // Hospitals
+    const hospitals = data.medical.filter(f => f.facility_type === 'hospital').sort((a, b) => a.distance_meters - b.distance_meters);
+    if (hospitals.length > 0) {
+        html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏥 Hospitals (${hospitals.length})</div>`;
+        hospitals.forEach((f, index) => {
+            html += createFacilityCard(f, '#dc2626', '#ffffff', `hospital-${index}`);
             addFacilityMarker(f, '#dc2626');
         });
-        html += `</div></details>`;
+        html += `</div>`;
     }
     
-    if (data.medical.length > 0) {
-        html += `
-            <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: #fee2e2; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #fecaca;">
-                    <span>🏥 Medical Facilities (${data.counts.medical})</span>
-                    <span style="font-size: 0.875rem;">▼</span>
-                </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
-        `;
-        data.medical.forEach((f, index) => {
-            html += createFacilityCard(f, '#dc2626', '#fef2f2', `medical-${index}`);
+    // Clinics & Health Centers (EXCLUDING pharmacies)
+    const clinics = data.medical.filter(f => f.facility_type !== 'hospital' && f.facility_type !== 'pharmacy').sort((a, b) => a.distance_meters - b.distance_meters);
+    if (clinics.length > 0) {
+        html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #991b1b; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💊 Clinics & Health Centers (${clinics.length})</div>`;
+        clinics.forEach((f, index) => {
+            html += createFacilityCard(f, '#dc2626', '#ffffff', `clinic-${index}`);
             addFacilityMarker(f, '#dc2626');
         });
-        html += `</div></details>`;
+        html += `</div>`;
     }
     
+    html += `</div></details>`;
+}
+    
+    // 2. EMERGENCY SERVICES (Fire Stations, Police Stations)
     if (data.emergency_services.length > 0) {
         html += `
             <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #dc2626; padding: 0.875rem; background: #fee2e2; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #fecaca;">
-                    <span>🚒 Emergency Services (${data.counts.emergency_services})</span>
+                <summary style="cursor: pointer; font-weight: 700; color: #f97316; padding: 0.875rem; background: linear-gradient(135deg, #fed7aa 0%, #fdba74 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #f97316;">
+                    <span>🚨 Emergency Services (${data.counts.emergency_services})</span>
                     <span style="font-size: 0.875rem;">▼</span>
                 </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #fff7ed; border-radius: 6px;">
         `;
-        data.emergency_services.forEach((f, index) => {
-            html += createFacilityCard(f, '#dc2626', '#fef2f2', `emergency-${index}`);
-            addFacilityMarker(f, '#dc2626');
-        });
+        
+        const fireStations = data.emergency_services.filter(f => f.facility_type === 'fire_station').sort((a, b) => a.distance_meters - b.distance_meters);
+        const policeStations = data.emergency_services.filter(f => f.facility_type === 'police').sort((a, b) => a.distance_meters - b.distance_meters);
+        
+        if (fireStations.length > 0) {
+            html += `<div style="margin-bottom: ${policeStations.length > 0 ? '0.75rem' : '0'};"><div style="font-size: 0.75rem; font-weight: 700; color: #c2410c; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🚒 Fire Stations (${fireStations.length})</div>`;
+            fireStations.forEach((f, index) => {
+                html += createFacilityCard(f, '#f97316', '#ffffff', `fire-${index}`);
+                addFacilityMarker(f, '#f97316');
+            });
+            html += `</div>`;
+        }
+        
+        if (policeStations.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #c2410c; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">👮 Police Stations (${policeStations.length})</div>`;
+            policeStations.forEach((f, index) => {
+                html += createFacilityCard(f, '#3b82f6', '#ffffff', `police-${index}`);
+                addFacilityMarker(f, '#3b82f6');
+            });
+            html += `</div>`;
+        }
+        
         html += `</div></details>`;
     }
-    
+
+    // 3. GOVERNMENT OFFICES & SCHOOLS (Evacuation Centers) - REORGANIZED
+
+    // ✅ FIRST: Define both variables at the top
+    const governmentBuildings = data.evacuation_centers.filter(f => 
+        ['community_centre', 'townhall', 'public_building'].includes(f.facility_type)
+    ).sort((a, b) => a.distance_meters - b.distance_meters);
+
+    const schools = data.evacuation_centers.filter(f => 
+        ['school', 'kindergarten', 'college', 'university'].includes(f.facility_type)
+    ).sort((a, b) => a.distance_meters - b.distance_meters);
+
+    // 3A. GOVERNMENT OFFICES DROPDOWN
+    if (governmentBuildings.length > 0) {
+        html += `
+            <details class="facility-details" style="margin-bottom: 0.75rem;">
+                <summary style="cursor: pointer; font-weight: 700; color: #059669; padding: 0.875rem; background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #059669;">
+                    <span>🏛️ Government Offices (${governmentBuildings.length})</span>
+                    <span style="font-size: 0.875rem;">▼</span>
+                </summary>
+                <div style="margin-top: 0.5rem; padding: 0.75rem; background: #f0fdf4; border-radius: 6px;">
+                    <div style="background: #fef3c7; border-left: 3px solid #f59e0b; padding: 0.625rem; border-radius: 4px; margin-bottom: 0.75rem;">
+                        <p style="margin: 0; font-size: 0.75rem; color: #92400e; line-height: 1.5;">
+                            ℹ️ <strong>Note:</strong> Government buildings and schools commonly serve as evacuation sites during disasters. Total: <strong>${totalEvacCenters} sites (${governmentBuildings.length} government + ${schools.length} schools)</strong>. Confirm with your local DRRMO for official designations.
+                        </p>
+                    </div>
+                    
+                    <div style="margin-bottom: 0;">
+        `;
+        
+        governmentBuildings.forEach((f, index) => {
+            html += createFacilityCard(f, '#059669', '#ffffff', `gov-${index}`);
+            addFacilityMarker(f, '#059669');
+        });
+        
+        html += `
+                    </div>
+                </div>
+            </details>
+        `;
+    }
+
+    // 3B. SCHOOLS DROPDOWN - CATEGORIZED BY TYPE
+    if (schools.length > 0) {
+        // Categorize schools
+        const elementarySchools = schools.filter(f => 
+            f.facility_type === 'kindergarten' || 
+            (f.facility_type === 'school' && (
+                f.name.toLowerCase().includes('elementary') || 
+                f.name.toLowerCase().includes('elem')
+            ))
+        );
+        
+        const highSchools = schools.filter(f => 
+            f.facility_type === 'school' && (
+                f.name.toLowerCase().includes('high') || 
+                f.name.toLowerCase().includes('secondary') ||
+                f.name.toLowerCase().includes('senior')
+            )
+        );
+        
+        const colleges = schools.filter(f => 
+            f.facility_type === 'college' || 
+            f.facility_type === 'university' ||
+            (f.facility_type === 'school' && (
+                f.name.toLowerCase().includes('college') || 
+                f.name.toLowerCase().includes('university')
+            ))
+        );
+        
+        // Generic schools (couldn't categorize)
+        const genericSchools = schools.filter(f => 
+            !elementarySchools.includes(f) && 
+            !highSchools.includes(f) && 
+            !colleges.includes(f)
+        );
+        
+        html += `
+            <details class="facility-details" style="margin-bottom: 0.75rem;">
+                <summary style="cursor: pointer; font-weight: 700; color: #7c3aed; padding: 0.875rem; background: linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #7c3aed;">
+                    <span>🎓 Schools (${schools.length})</span>
+                    <span style="font-size: 0.875rem;">▼</span>
+                </summary>
+                <div style="margin-top: 0.5rem; padding: 0.75rem; background: #faf5ff; border-radius: 6px;">
+                    <div style="background: #fef3c7; border-left: 3px solid #f59e0b; padding: 0.625rem; border-radius: 4px; margin-bottom: 0.75rem;">
+                        <p style="margin: 0; font-size: 0.75rem; color: #92400e; line-height: 1.5;">
+                            ℹ️ <strong>Note:</strong> Government buildings and schools commonly serve as evacuation sites during disasters. Total: <strong>${totalEvacCenters} sites (${governmentBuildings.length} government + ${schools.length} schools)</strong>. Confirm with your local DRRMO for official designations.
+                        </p>
+                    </div>
+        `;
+        
+        // Elementary Schools
+        if (elementarySchools.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">📚 Elementary Schools (${elementarySchools.length})</div>`;
+            elementarySchools.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `elem-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        // High Schools
+        if (highSchools.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏫 High Schools (${highSchools.length})</div>`;
+            highSchools.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `high-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        // Colleges/Universities
+        if (colleges.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🎓 Colleges/Universities (${colleges.length})</div>`;
+            colleges.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `college-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        // Generic Schools (if any couldn't be categorized)
+        if (genericSchools.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #6b21a8; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🏫 Other Schools (${genericSchools.length})</div>`;
+            genericSchools.forEach((f, index) => {
+                html += createFacilityCard(f, '#7c3aed', '#ffffff', `generic-${index}`);
+                addFacilityMarker(f, '#7c3aed');
+            });
+            html += `</div>`;
+        }
+        
+        html += `
+                </div>
+            </details>
+        `;
+    }
+      
+    // 5. ESSENTIAL SERVICES (Markets, Banks, Fuel, Food)
     if (data.essential_services.length > 0) {
         html += `
             <details class="facility-details" style="margin-bottom: 0.75rem;">
-                <summary style="cursor: pointer; font-weight: 700; color: #2563eb; padding: 0.875rem; background: #dbeafe; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 1px solid #93c5fd;">
-                    <span>🛒 Essential Services (${data.counts.essential})</span>
+                <summary style="cursor: pointer; font-weight: 700; color: #2563eb; padding: 0.875rem; background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%); border-radius: 6px; display: flex; justify-content: space-between; align-items: center; border: 2px solid #2563eb;">
+                    <span>🏪 Essential Services (${data.counts.essential})</span>
                     <span style="font-size: 0.875rem;">▼</span>
                 </summary>
-                <div style="margin-top: 0.5rem; padding: 0.5rem;">
+                <div style="margin-top: 0.5rem; padding: 0.5rem; background: #eff6ff; border-radius: 6px;">
         `;
-        data.essential_services.forEach((f, index) => {
-            html += createFacilityCard(f, '#2563eb', '#eff6ff', `essential-${index}`);
-            addFacilityMarker(f, '#2563eb');
-        });
+        
+        // Pharmacies (NEW - added at top of essential services)
+            const pharmacies = data.essential_services.filter(f => f.facility_type === 'pharmacy').sort((a, b) => a.distance_meters - b.distance_meters);
+            if (pharmacies.length > 0) {
+                html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💊 Pharmacies (${pharmacies.length})</div>`;
+                pharmacies.forEach((f, index) => {
+                    html += createFacilityCard(f, '#2563eb', '#ffffff', `pharmacy-${index}`);
+                    addFacilityMarker(f, '#2563eb');
+                });
+                html += `</div>`;
+            }
+        
+        // Markets & Supermarkets
+        const markets = data.essential_services.filter(f => ['marketplace', 'supermarket', 'convenience', 'mall', 'department_store'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        if (markets.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🛒 Markets & Stores (${markets.length})</div>`;
+            markets.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `market-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
+        // Banks & ATMs
+        const banks = data.essential_services.filter(f => ['bank', 'atm'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        if (banks.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">💰 Banks & ATMs (${banks.length})</div>`;
+            banks.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `bank-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
+        // Fuel Stations
+        const fuel = data.essential_services.filter(f => f.facility_type === 'fuel').sort((a, b) => a.distance_meters - b.distance_meters);
+        if (fuel.length > 0) {
+            html += `<div style="margin-bottom: 0.75rem;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">⛽ Fuel Stations (${fuel.length})</div>`;
+            fuel.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `fuel-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
+        // Restaurants & Cafes
+        const food = data.essential_services.filter(f => ['restaurant', 'fast_food', 'cafe'].includes(f.facility_type)).sort((a, b) => a.distance_meters - b.distance_meters);
+        if (food.length > 0) {
+            html += `<div style="margin-bottom: 0;"><div style="font-size: 0.75rem; font-weight: 700; color: #1e40af; text-transform: uppercase; margin-bottom: 0.5rem; padding: 0.5rem; background: white; border-radius: 4px;">🍽️ Restaurants & Cafes (${food.length})</div>`;
+            food.forEach((f, index) => {
+                html += createFacilityCard(f, '#2563eb', '#ffffff', `food-${index}`);
+                addFacilityMarker(f, '#2563eb');
+            });
+            html += `</div>`;
+        }
+        
         html += `</div></details>`;
     }
     
+    // Data source footer
     html += `
         <div style="margin-top: 1.5rem; padding: 0.875rem; background: #f9fafb; border-radius: 6px; text-align: center; border: 1px solid #e5e7eb;">
             <p style="margin: 0; font-size: 0.75rem; color: #6b7280;">
-                📍 Data from OpenStreetMap contributors
+                📍 Data from OpenStreetMap contributors<br>
+                <span style="color: #9ca3af; font-size: 0.7rem;">Distances shown are straight-line approximations</span>
             </p>
         </div>
     `;
     
     container.innerHTML = html;
     attachFacilityClickListeners();
+    attachEmergencyPreparednessClickListeners(); // NEW: Attach click handlers for emergency summary
+}
+
+function attachEmergencyPreparednessClickListeners() {
+    const clickableCards = document.querySelectorAll('.clickable-facility');
+    
+    clickableCards.forEach(card => {
+        card.addEventListener('click', function() {
+            const lat = parseFloat(this.dataset.lat);
+            const lng = parseFloat(this.dataset.lng);
+            
+            // Zoom to facility location
+            map.setView([lat, lng], 17, {
+                animate: true,
+                duration: 0.5
+            });
+            
+            // Open the marker popup
+            facilityMarkers.eachLayer(layer => {
+                if (layer instanceof L.Marker) {
+                    const markerLatLng = layer.getLatLng();
+                    if (Math.abs(markerLatLng.lat - lat) < 0.00001 && 
+                        Math.abs(markerLatLng.lng - lng) < 0.00001) {
+                        layer.openPopup();
+                    }
+                }
+            });
+        });
+    });
 }
 
 function createFacilityCard(facility, borderColor, bgColor, facilityId) {
@@ -1133,6 +1614,112 @@ function toggleRecommendations() {
     }
 }
 
+async function loadMunicipalitySummary(municipalityCode) {
+    const panel = document.getElementById('municipality-summary-panel');
+    const content = document.getElementById('municipality-summary-content');
+    
+    // Show panel with loading state
+    panel.classList.remove('hidden');
+    content.innerHTML = `
+        <div style="text-align: center; padding: 1.5rem 0.5rem;">
+            <div class="loading-spinner" style="width: 30px; height: 30px; border-width: 3px;"></div>
+            <p style="color: #6b7280; font-size: 0.75rem; margin-top: 0.5rem;">Loading...</p>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch(`/api/municipality-info/?code=${municipalityCode}`);
+        const data = await response.json();
+        
+        if (data.found && data.municipality) {
+            const muni = data.municipality;
+            
+            // Determine poverty color
+            let povertyColor = '#10b981';  // Green
+            if (muni.poverty_incidence_rate > 30) povertyColor = '#ef4444';  // Red
+            else if (muni.poverty_incidence_rate > 20) povertyColor = '#f59e0b';  // Yellow
+            
+            // Format revenue more compactly
+            const revenueShort = muni.revenue >= 1000000 
+                ? `₱${(muni.revenue / 1000000).toFixed(1)}M`
+                : `₱${(muni.revenue / 1000).toFixed(0)}K`;
+            
+            // Build COMPACT municipality summary HTML
+            content.innerHTML = `
+                <!-- Municipality Header -->
+                <div class="muni-header">
+                    <div class="muni-name">${muni.name}</div>
+                    <div class="muni-category">${muni.category}</div>
+                </div>
+                
+                <!-- Population -->
+                <div class="muni-stat-card" style="border-left-color: #3b82f6;">
+                    <div class="muni-stat-label">👥 POPULATION</div>
+                    <div class="muni-stat-value">${muni.population_display}</div>
+                </div>
+                
+                <!-- Revenue - COMPACT -->
+                <div class="muni-stat-card" style="border-left-color: #10b981;">
+                    <div class="muni-stat-label">💰 REVENUE</div>
+                    <div class="muni-stat-value" style="font-size: 0.85rem;">${revenueShort}</div>
+                    <div style="font-size: 0.65rem; color: #6b7280; margin-top: 0.125rem;">${muni.revenue_display}</div>
+                </div>
+                
+                <!-- Provincial Score -->
+                <div class="muni-stat-card" style="border-left-color: #8b5cf6;">
+                    <div class="muni-stat-label">📊 PROVINCIAL SCORE</div>
+                    <div class="muni-stat-value">
+                        ${muni.provincial_score !== null ? muni.provincial_score.toFixed(2) : 'N/A'}
+                    </div>
+                </div>
+                
+                <!-- Poverty Incidence - COMPACT -->
+                <div class="muni-stat-card" style="background: linear-gradient(135deg, ${povertyColor}10 0%, ${povertyColor}20 100%); border: 2px solid ${povertyColor}; border-left: 3px solid ${povertyColor};">
+                    <div class="muni-stat-label">📉 POVERTY RATE</div>
+                    <div class="muni-stat-value" style="color: ${povertyColor};">
+                        ${muni.poverty_incidence_rate !== null ? muni.poverty_incidence_rate.toFixed(1) : 'N/A'}%
+                    </div>
+                    <div style="width: 100%; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin-top: 0.375rem;">
+                        <div style="width: ${muni.poverty_incidence_rate}%; height: 100%; background: ${povertyColor}; transition: width 0.8s;"></div>
+                    </div>
+                </div>
+                
+                <!-- Data Source - COMPACT -->
+                <div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e5e7eb; font-size: 0.6rem; color: #9ca3af; text-align: center; line-height: 1.3;">
+                    📊 DTI 2024 Data
+                </div>
+            `;
+        } else {
+            content.innerHTML = `
+                <div style="text-align: center; padding: 1rem 0.5rem; color: #6b7280;">
+                    <div style="font-size: 1.5rem; margin-bottom: 0.375rem;">📭</div>
+                    <p style="margin: 0; font-size: 0.75rem;">No data available</p>
+                </div>
+            `;
+        }
+    } catch (error) {
+        console.error('Error loading municipality summary:', error);
+        content.innerHTML = `
+            <div style="text-align: center; padding: 1rem 0.5rem; color: #ef4444;">
+                <div style="font-size: 1.5rem; margin-bottom: 0.375rem;">❌</div>
+                <p style="margin: 0; font-size: 0.75rem;">Error loading</p>
+            </div>
+        `;
+    }
+}
+
+function setupMunicipalityPanel() {
+    const closeBtn = document.getElementById('close-municipality-panel');
+    const panel = document.getElementById('municipality-summary-panel');
+    
+    if (closeBtn && panel) {
+        closeBtn.addEventListener('click', function() {
+            panel.classList.add('hidden');
+        });
+    }
+}
+
+
 // Initialize everything when DOM is ready
 document.addEventListener('DOMContentLoaded', function () {
     initMap();
@@ -1143,5 +1730,5 @@ document.addEventListener('DOMContentLoaded', function () {
     setupLayerToggles();
     setupUploadModal();
     setupSearch();
-
+    setupMunicipalityPanel();
 });

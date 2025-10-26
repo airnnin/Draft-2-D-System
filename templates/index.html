@@ -57,6 +57,17 @@
                 </button>
             </div>
 
+            <!-- NEW: Municipality Summary Panel (Right Side, Below Disaster Layers) -->
+            <div id="municipality-summary-panel" class="municipality-panel hidden">
+                <div class="municipality-panel-header">
+                    <h4>Municipality Summary</h4>
+                    <button class="close-panel-btn" id="close-municipality-panel">×</button>
+                </div>
+                <div id="municipality-summary-content" class="municipality-panel-content">
+                    <p class="info-prompt">Click on any barangay to view municipality data</p>
+                </div>
+            </div>
+
             <!-- Layer Control Panel -->
             <div id="layer-panel" class="layer-panel hidden">
                 <div class="layer-panel-header">
@@ -139,7 +150,10 @@
                                 <option value="flood">Flood Susceptibility (Shapefile)</option>
                                 <option value="landslide">Landslide Susceptibility (Shapefile)</option>
                                 <option value="liquefaction">Liquefaction Susceptibility (Shapefile)</option>
-                                <option value="barangay_new">Barangay Boundaries - PSA-NAMRIA</option>
+                                <option value="barangay_new">Barangay Boundaries - PSA-NAMRIA (Shapefile)</option>
+                                <option value="municipality_characteristics">Municipality Characteristics (CSV)</option> 
+                                <option value="barangay_characteristics">Barangay Characteristics (CSV)</option>
+                                <option value="zonal_values">Zonal Values - Land Prices (CSV)</option>
                             </select>
                         </div>
                         
@@ -156,8 +170,8 @@
                         </div>
 
                         <div class="form-group">
-                            <label for="shapefile-input">Select File (ZIP format):</label>
-                            <input type="file" id="shapefile-input" name="shapefile" accept=".zip" required>
+                            <label for="shapefile-input">Select File:</label>
+                            <input type="file" id="shapefile-input" name="shapefile" accept=".zip,.csv" required>
                         </div>
                         
                         <div class="form-actions">
